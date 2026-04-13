@@ -1,0 +1,97 @@
+{
+	"system":	{
+		"theme":	0,
+		"mile_display" : 0,
+		"led_levl":	3,
+		"dis_uint":	0,
+		"language":	1,
+		"link_type":0,
+		"bt_switch": 1,
+		"uuid_active": 0,
+		"start_scr" : 0,
+		"tcs_switch": 0,
+		"temp_unit": 0,
+		"time_foramt": 1,
+		"tpms_unit":	0,
+		"auto_hedlight": 0,
+		"sys_log":	0,
+		"drive_mode":	0,
+		"int_reserve0":	0,
+		"int_reserve1":	0,
+		"int_reserve2":	0,
+		"int_reserve3":	0,
+		"int_reserve4":	0,
+		"int_reserve5":	0,
+		"int_reserve6":	0,
+		"int_reserve7":	0,
+		"int_reserve8":	0,
+		"int_reserve9":	0,
+		"int_reserve10":0
+	},
+	"tpms":	{
+		"l_front_tpms_id": 0,
+		"l_rear_tpms_id": 0,
+		"r_front_tpms_id": 0,
+		"r_rear_tpms_id": 0,
+		"l_front_pressure":	0,
+		"l_rear_pressure":	0,
+		"r_front_pressure":	0,
+		"r_rear_pressure":	0,
+		"l_front_temp":	0,
+		"l_rear_temp":	0,
+		"r_front_temp":	0,
+		"r_rear_temp":	0,
+		"reserve0":	0,
+		"reserve1":	0,
+		"reserve2":	0,
+		"reserve3":	0,
+		"int_reserve0":	0,
+		"int_reserve1":	0,
+		"int_reserve2":	0,
+		"int_reserve3":	0
+	},
+	"update":	{
+		"update_mcu":	0,
+		"mcu_len":	0,
+		"reserve1":	0
+	},
+	"maintenance":	{
+		"count":	0,
+		"cur_main_mileage":	1000,
+		"last_main_mileage":	0,
+		"cur_main_days":	365,
+		"is_set_main_time":	0,
+		"last_main_date":	{
+			"year":	0,
+			"month":	0,
+			"day":	0
+		},
+		"int_reserve0":	0
+	},
+	"rideinfo":	{
+		"ride_time_a":0,
+		"ride_time_b":0
+	},
+	"uuid": {
+		"carlink_uuid":" ",
+		"int_reserve0":0
+	},
+	"reserve":	{
+		"reserve0":	0,
+		"reserve1":	0,
+		"reserve2":	0,
+		"reserve3":	0,
+		"reserve4":	0,
+		"reserve5":	0,
+		"reserve6":	0,
+		"reserve7":	0
+	},
+	"reserve1":	{
+		"int_reserve0":	0,
+		"int_reserve1":	0,
+		"int_reserve2":	0,
+		"int_reserve3":	0,
+		"int_reserve4":	0,
+		"int_reserve5":	0
+	}
+}
