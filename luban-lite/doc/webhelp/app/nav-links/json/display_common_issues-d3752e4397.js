@@ -1,1 +1,0 @@
-oxy_webhelp_navlinks = {"display_common_issues-d3752e4397":{"topics":[{"title":"调屏常见问题","href":"topics\/sdk\/display\/display_faq_screen_2.html","attributes":{"data-id":"concept_smb_cl3_pzb"},"menu":{"hasChildren":false},"tocID":"concept_smb_cl3_pzb-d3752e4411","topics":[]}]}};

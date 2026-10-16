@@ -1,5 +1,0 @@
-menu "Device Control"
-
-source "$PKGS_DIR/packages/arduino/devicecontrol/Adafruit-PCF8574/Kconfig"
-
-endmenu

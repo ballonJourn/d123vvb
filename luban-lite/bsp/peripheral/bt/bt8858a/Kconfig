@@ -1,3 +1,0 @@
-config AIC_BT_BT8858A
-    bool "Using BT8858A/8852A driver"
-    default n
