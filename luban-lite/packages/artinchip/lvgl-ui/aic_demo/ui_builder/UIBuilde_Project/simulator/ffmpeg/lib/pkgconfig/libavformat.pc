@@ -1,0 +1,14 @@
+prefix=/c/Users/zequan.liang/Desktop/ui/LVGL/vscode_simulate/lvgl_v8v9_vscode_win64/third-party/ffmpeg/sources/source-master/ffmpeg_install
+exec_prefix=${prefix}
+libdir=/c/Users/zequan.liang/Desktop/ui/LVGL/vscode_simulate/lvgl_v8v9_vscode_win64/third-party/ffmpeg/sources/source-master/ffmpeg_install/lib
+includedir=/c/Users/zequan.liang/Desktop/ui/LVGL/vscode_simulate/lvgl_v8v9_vscode_win64/third-party/ffmpeg/sources/source-master/ffmpeg_install/include
+
+Name: libavformat
+Description: FFmpeg container format library
+Version: 61.9.107
+Requires: 
+Requires.private: libavcodec >= 61.33.102, libavutil >= 59.58.100
+Conflicts:
+Libs: -L${libdir}  -lavformat 
+Libs.private: -lm -latomic -lz
+Cflags: -I${includedir}

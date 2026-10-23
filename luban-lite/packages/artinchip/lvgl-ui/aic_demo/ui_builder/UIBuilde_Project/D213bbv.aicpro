@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ai_lvgl>
+  <project_name>D213bbv</project_name>
+  <ver_major>2</ver_major>
+  <ver_minor>1</ver_minor>
+  <ver_release>0</ver_release>
+  <lvgl_version>1</lvgl_version>
+  <board_id>1</board_id>
+  <template_id>0</template_id>
+  <use_multi_language>1</use_multi_language>
+  <color_depth>16</color_depth>
+  <resolution>
+    <width>480</width>
+    <height>272</height>
+  </resolution>
+</ai_lvgl>
