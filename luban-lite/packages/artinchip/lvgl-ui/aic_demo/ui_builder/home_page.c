@@ -471,3 +471,21 @@ void home_page_update_current_language()
 
 }
 
+/* Show/hide the entire home_page. Driven by link_logic.c timer polling
+ * VEH_DVR_PLAYING; mirrors phone_refresh_link_state() pattern (link_view.c:179). */
+void home_page_set_visible(bool visible)
+{
+    home_page_t *scr = home_page_get(&ui_manager);
+    if (!scr->obj) return;
+
+    bool is_hidden = lv_obj_has_flag(scr->obj, LV_OBJ_FLAG_HIDDEN);
+    if (visible == !is_hidden) return;  /* already in desired state */
+
+    if (visible) {
+        lv_obj_remove_flag(scr->obj, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(scr->obj, LV_OBJ_FLAG_HIDDEN);
+    }
+    lv_obj_invalidate(scr->obj);
+}
+

@@ -168,6 +168,8 @@ void home_page_create(ui_manager_t *ui);
 void setting_page_create(ui_manager_t *ui);
 void phone_page_create(ui_manager_t *ui);
 
+void home_page_set_visible(bool visible);
+
 void home_page_update_language(lang_type_t lang);
 void home_page_update_current_language();
 void setting_page_update_language(lang_type_t lang);

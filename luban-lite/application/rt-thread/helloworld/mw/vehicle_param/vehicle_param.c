@@ -2,7 +2,6 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include "app_log.h"
-#include "vehicle_param.h"
 
 #define VEH_INVALID_DATA INT32_MIN
 

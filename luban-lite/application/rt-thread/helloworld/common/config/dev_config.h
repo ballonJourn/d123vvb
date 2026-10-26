@@ -63,6 +63,8 @@ extern "C" {
 
 #define SPEED_PWM_ENABLE 0
 
+#define ENABLE_BD_USB_DVR_FUNC 1
+
 #ifdef __cplusplus
 }
 #endif //__cplusplus

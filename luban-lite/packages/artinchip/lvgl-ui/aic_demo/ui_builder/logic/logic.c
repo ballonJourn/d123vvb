@@ -9,6 +9,7 @@
 #include "vehicle_data.h"
 #include "vehicle_argument.h"
 #include "vehicle_mile.h"
+#include "vehicle_param.h"
 #include "mileage_calc.h"
 #include "window_manager.h"
 #include "button_manager.h"
@@ -217,6 +218,9 @@ void timer_refresh_50_ms(lv_timer_t *info)
     if (checkself_get_state() != CHECK_STATE_FINISHED /*|| get_demonstration_state()*/ ) 
         return  ;
     
+    int __dvr = vehicle_get_data(VEH_DVR_PLAYING) ;
+    home_page_set_visible(__dvr == 0) ;
+
     button_manager_refresh();
 
     int32_t value = vehicle_get_data_speed();

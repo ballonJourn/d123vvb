@@ -27,6 +27,8 @@ path += [cwd + '/mw/avg_consumption']
 path += [cwd + '/mw/power_manage']
 path += [cwd + '/mw/wireless_unlock']
 path += [cwd + '/mw/pwm_cap']
+path += [cwd + '/mw/dvr']
+path += [cwd + '/mw/usbhost']
 path += [cwd + '/third']
 path += [cwd + '/third/json']
 path += [cwd + '/third/carlink/inc']
@@ -53,6 +55,8 @@ src  += Glob('mw/avg_consumption/*.c')
 src  += Glob('mw/power_manage/*.c')
 src  += Glob('mw/wireless_unlock/*.c')
 src  += Glob('mw/pwm_cap/*.c')
+src  += Glob('mw/dvr/*.c')
+src  += Glob('mw/usbhost/*.c')
 libs += ['libECTinyPlus_och.a']
 
 CFLAGS = ' -c -ffunction-sections'

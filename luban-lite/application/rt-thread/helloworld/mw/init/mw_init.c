@@ -4,6 +4,7 @@
 #include "mw_log.h"
 #include "set_param.h"
 #include "mw_can.h"
+#include "mw_dvr.h"
 #include "mw_init.h"
 #include "adc_key.h"
 #include "gpio_light.h"
@@ -72,6 +73,16 @@ int mw_init(void) {
 #if MW_CARLINK_EC_ENABLE
     extern void start_carlink(void);
     start_carlink();
+#endif
+
+#if ENABLE_BD_USB_DVR_FUNC
+    {
+        mw_logi("usb monitor init start!\n");
+        rt_err_t ret = mw_usbhost_init();
+        if (ret != RT_EOK) {
+            mw_loge("usb monitor init failed: %d\n", ret);
+        }
+    }
 #endif
 
     return 0;
