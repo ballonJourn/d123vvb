@@ -14,8 +14,7 @@ extern "C" {
 #if POWER_MANAGE_ENABLE
 
 #define POWER_CTRL_PIN  "PD.0"   
-#define IGN_DET_PIN     "PD.8"  
-#define IGN_POWER_CTRL  "PC.7"
+#define IGN_DET_PIN     "PC.0"  
 
 typedef enum {
     IGN_STATE_UNKNOWN = 0,

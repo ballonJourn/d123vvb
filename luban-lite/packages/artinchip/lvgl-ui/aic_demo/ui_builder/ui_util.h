@@ -22,7 +22,6 @@ void ui_style_init(lv_style_t * style);
 lv_font_t *ui_font_init(char *path, int size);
 
 int count_png_files(const char *path, uint8_t pic_mode);
-int count_jpg_files(const char *path);
 #ifdef __cplusplus
 } /*extern "C"*/
 #endif

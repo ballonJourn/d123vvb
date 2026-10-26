@@ -13,11 +13,13 @@
 #define VEH_IO_CHECK_PERIOD (100)
 
 ///< gpio探测脚
-#define VEH_LEFT_TURN_DET_GPIO  ("PD.11")
-#define VEH_RIGHT_TURN_DET_GPIO ("PD.12")
-#define VEH_BATTERT_CHARGE_STATUS_GPIO ("PE.17")
-// #define VEH_HEAD_LIGHT_DET_GPIO ("PD.5")
-// #define VEH_DAY_RUN_LIGHT_GPIO  ("PD.4")
+#define VEH_LEFT_TURN_DET_GPIO  ("PD.7")
+#define VEH_RIGHT_TURN_DET_GPIO ("PD.6")
+#define VEH_HEAD_LIGHT_DET_GPIO ("PD.5")
+#define VEH_DAY_RUN_LIGHT_GPIO  ("PD.4")
+#ifndef MW_CARLINK_EC_ENABLE
+#define VEH_GB_T_DET_GPIO       ("PB.11")
+#endif
 
 typedef struct {
     const char *pin_name;
@@ -36,10 +38,14 @@ static uint8_t gpio_last_value[6] = {0};
 static uint8_t gpio_count[6] = {0};
 #endif
 
-static gpio_ctrl_t pin_ctrl[] = {
-    {VEH_LEFT_TURN_DET_GPIO, 0},
-    {VEH_RIGHT_TURN_DET_GPIO, 0},
-    {VEH_BATTERT_CHARGE_STATUS_GPIO, 0},
+static gpio_ctrl_t pin_ctrl[5] = {
+    [0] = {VEH_LEFT_TURN_DET_GPIO, 0},
+    [1] = {VEH_RIGHT_TURN_DET_GPIO, 0},
+    [2] = {VEH_HEAD_LIGHT_DET_GPIO, 0},
+    [3] = {VEH_DAY_RUN_LIGHT_GPIO, 0},
+#ifndef MW_CARLINK_EC_ENABLE
+    [4] = {VEH_GB_T_DET_GPIO, 0},
+#endif
 };
 
 static void set_frame_light(uint32_t pin, int value) {
@@ -48,11 +54,15 @@ static void set_frame_light(uint32_t pin, int value) {
      } else if (pin == pin_ctrl[1].pin) {
         vehicle_set_data(VEH_INDICATOR_TURN_RIGHT, !value);
      } else if (pin == pin_ctrl[2].pin) {
-        vehicle_set_data(VEH_CHARGER_STATUS, !value);
+        vehicle_set_data(VEH_LIGHT_HIGH_BEAM, !value);
+     } else if (pin == pin_ctrl[3].pin) {
+        vehicle_set_data(VEH_AUTO_HEADLIGH, !value);
      } 
-    //  else if (pin == pin_ctrl[3].pin) {
-    //     vehicle_set_data(VEH_AUTO_HEADLIGH, !value);
-    //  } 
+#ifndef MW_CARLINK_EC_ENABLE
+     else if (pin == pin_ctrl[4].pin) {
+        vehicle_set_data(VEH_LIGHT_GB, !value);
+     }  
+#endif
 }
 
 /**
@@ -88,26 +98,25 @@ static void check_frame_light(uint32_t pin, int io_index, bool is_filter) {
 }
 
 static void scan_frame_light(void) {
-      for (uint8_t i = 0; i < ARRAY_SIZE(pin_ctrl); i++) {
+      for (uint8_t i = 0; i < 5; i++) {
+#ifdef MW_CARLINK_EC_ENABLE
+        if (i == 4) {
+            break;
+        }
+#endif
         check_frame_light(pin_ctrl[i].pin, i, false);
     }
 }
 
 static void set_light_gpio_input(void) {
-    for (uint8_t i = 0; i < ARRAY_SIZE(pin_ctrl); i++) {
+    for (uint8_t i = 0; i < 5; i++) {
+#ifdef MW_CARLINK_EC_ENABLE
+        if (i == 4) {
+            break;
+        }
+#endif
         pin_ctrl[i].pin = rt_pin_get(pin_ctrl[i].pin_name);
         rt_pin_mode(pin_ctrl[i].pin, PIN_MODE_INPUT);
-    }
-}
-
-static void debug_charge_status_level(void) {
-    static int last_value = -1;
-    int value = rt_pin_read(pin_ctrl[2].pin);
-
-    if (value != last_value) {
-        last_value = value;
-        rt_kprintf("%s raw = %d -> VEH_CHARGER_STATUS = %d\n",
-                   pin_ctrl[2].pin_name, value, !value);
     }
 }
 
@@ -117,16 +126,15 @@ static void gpio_control_thread(void *parameter) {
     while (1) {
         rt_thread_mdelay(VEH_IO_CHECK_PERIOD);
         scan_frame_light();
-        // debug_charge_status_level();
     }
 }
 
 int light_gpio_init(void) {
     rt_thread_t thread;
 
-    thread = rt_thread_create("gpio_control_thread",
-                           gpio_control_thread,
-                           RT_NULL, 2048,
+    thread = rt_thread_create("gpio_control_thread", 
+                           gpio_control_thread, 
+                           RT_NULL, 1024, 
                            12, 10);
     if (thread != RT_NULL) {
         rt_thread_startup(thread);

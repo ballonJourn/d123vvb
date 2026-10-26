@@ -77,11 +77,14 @@ void virtual_button_init()
 
 void custom_init()
 {
-    /* 开机动画已提前到 ui_init() 播放，动画播完由 boot_animation_finish_cb()
-     * 回调进入 custom_init()，此处不再重复启动动画 */
+    #if !defined(AIC_STARTUP_UI_SHOW)
+    //播放自定义开机动画
+    extern void boot_animation_init() ;
+    boot_animation_init() ;
+    #endif
 
     /* Add your codes here */
     home_logic_init();
-
+    
 }
 

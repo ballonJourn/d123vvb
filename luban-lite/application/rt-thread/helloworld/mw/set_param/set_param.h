@@ -14,15 +14,6 @@ extern "C" {
 #define pads(index, num)   uint8_t pads##index[num]
 #define MAX_UUID_LEN        (20)
 
-/* 蓝牙胎压传感器配对信息, 见 mw/bt_tpms/ */
-#define BT_TPMS_WHEEL_NUM   (2)     ///< 蓝牙胎压车轮数 (两轮: 前/后)
-#define BT_TPMS_MAC_LEN     (6)     ///< 传感器 MAC 字节数
-
-/* 续航里程参考数组: 每包 10 个"每 1% SOC 的参考里程", 8bit × 0.01km 编码 */
-#define REF_MILE_PACK_NUM     (3)      ///< 电池包数 (1 固定包 + 2 换电包)
-#define REF_MILE_ARR_NUM      (10)     ///< 每包数组长度
-#define REF_MILE_ARR_DEFAULT  (100)    ///< 默认参考里程 1.00km (100 × 0.01km)
-
 typedef struct {
     uint16_t year;             ///< 年    
     uint8_t mon;               ///< 月
@@ -64,9 +55,9 @@ typedef struct {
 typedef struct {
     uint32_t mile_format :1;  ///< 里程格式 0:公制 1：英制
     uint32_t mile_display :2; ///< 里程显示模式 0：显示ODO 1:trip_a 2:trip_b
-    uint32_t theme :1;        ///< 显示主题 0：白天 1:黑夜 2:自动
+    uint32_t theme :2;        ///< 显示主题 0：白天 1:黑夜 2:自动
     uint32_t brightness :3;  ///< 亮度等级 0:自动 1-5级
-    uint32_t language   :3; ///< 语言 0:英文 1:中文,预留位
+    uint32_t language   :3; ///< 语言 0:中文 1:英文,预留位
     uint32_t bt_switch :1;  ///< 蓝牙开关 0：关闭 1:打开
     uint32_t uuid_active_staus :1; ///< uuid激活状态 0:未激活 1:已激活
     uint32_t start_src :1;       ///< 启动源 0:bat 1:ign
@@ -78,8 +69,7 @@ typedef struct {
     uint32_t phone_type :1;   ///< 手机类型 0:安卓  1:ios
     uint32_t sys_log :1;     ///< 系统日志控制开关 0:关闭 1:开启
     uint32_t drive_mode :1;  ///< 驾驶模式 0：eco经济模式  1:驾驶模式
-    uint32_t reset_type :1;  ///< 里程清零方式 0:按键清零(主页长按 BACK) 1:下电清零(IGN OFF)
-    uint32_t resume :9;      ///< 预留
+    uint32_t resume :10;     ///< 预留
     uint32_t usr_reserve;   ///< 用户设置参数预留 4字节
 } usr_setting_t;
 
@@ -90,17 +80,8 @@ typedef struct {
     tpms_param_t tpms[MAX_WHEEL_POS_NUM];
     char carlink_uuid[MAX_UUID_LEN];
     update_param_t mcu_update;
-    ///< 三包续航参考里程数组, 8bit × 0.01km; 占用原预留区 36 字节中的 30 字节,
-    ///< 结构体总大小由此保持不变 (92 + 30 + 6 = 128 字节)
-    uint8_t ref_mile_arr[REF_MILE_PACK_NUM][REF_MILE_ARR_NUM];
-    pads(1, 6);         ///< 预留6个字节
-    ///< 蓝牙胎压传感器 MAC (索引 0=前轮/左前, 1=后轮/左后), 全 0 表示未配对
-    uint8_t bt_tpms_mac[BT_TPMS_WHEEL_NUM][BT_TPMS_MAC_LEN];
+    pads(1, 36);        ///< 预留40个字节
 } usr_param_t;
-
-///< usr_set.reset_type 取值（小计里程清零方式）
-#define RESET_TYPE_BY_BUTTON        (0)   ///< 按键清零：主页长按 BACK 时清零
-#define RESET_TYPE_AFTER_POWER_OFF  (1)   ///< 下电清零：IGN OFF 时清零
 
 /**
  * @brief usr param enum
@@ -135,7 +116,6 @@ typedef enum {
     USR_PARAM_PHONE_TYPE,
     USR_PARAM_SYS_LOG,
     USR_PARAM_DRIVE_MODE,
-    USR_PARAM_RESET_TYPE,     ///< 里程清零方式 0:按键清零 1:下电清零
 
     /* 手机互联uuid */
     USR_PARAM_EC_UUID,
@@ -152,17 +132,7 @@ typedef enum {
 
     /* mcu更新文件长度 */
     USR_PARAM_MCU_UPDATE_LEN,
-    USR_PARAM_MCU_UPDATE_TYPE,
-
-    USR_PARAM_START_SRC,
-
-    /* 续航参考里程数组 (三包各 10 个, 8bit × 0.01km) */
-    USR_PARAM_REF_MILE_ARR_P1,
-    USR_PARAM_REF_MILE_ARR_P2,
-    USR_PARAM_REF_MILE_ARR_P3,
-
-    /* 蓝牙胎压传感器 MAC (2 轮 × 6 字节, 见 mw/bt_tpms/) */
-    USR_PARAM_BT_TPMS_MAC,
+    USR_PARAM_MCU_UPDATE_TYPE
 } usr_param_handle_e;
 
 /**
@@ -194,13 +164,6 @@ bool set_usr_param(usr_param_handle_e id, void *param);
  * @return 0:保存成功  -1:保存失败
  */
 int save_usr_param(void);
-
-/**
- * @brief  关机前保存用户参数: 启动源置 1 并落盘
- *         (IGN/NFC/无线钥匙关机通用)
- * @return 0:保存成功  -1:保存失败
- */
-int shutdown_save_usr_param(void);
 
 /**
  * @brief  用户参数初始化

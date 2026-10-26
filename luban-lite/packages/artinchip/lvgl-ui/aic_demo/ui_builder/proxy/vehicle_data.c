@@ -3,7 +3,6 @@
 #include <stdbool.h>
 #include "vehicle_data.h"
 #include "vehicle_param.h"
-#include "usr_utils.h"
 
 #if !ON_PC_CACLE
 // #include "common/version/hcn_version.h"
@@ -18,21 +17,18 @@ typedef struct {
 #define VEH_INVALID_VALUE INT32_MIN
 
 static const Signal_Lamp_Mapping_t signalMaps[] = {
-    {ICON_MW         , VEH_DTC_CODE     } ,
-    {ICON_TW         , VEH_LIGHT_TIRE           } ,
-    {ICON_TC          , VEH_LIGHT_GPS           } ,
+    {ICON_GMS         , VEH_BT_PHONE_SIGNAL     } ,
+    {ICON_BT         , VEH_BT_CONNECTED_STATUS } ,
+    {ICON_GPS          , VEH_LIGHT_GPS           } ,
     {ICON_HIGH_BEAM   , VEH_LIGHT_HIGH_BEAM     } ,
-    {ICON_NEAR_BEAM   , VEH_LIGHT_LOW_BEAM       } ,
     {ICON_LEFT        , VEH_INDICATOR_TURN_LEFT } ,
+    {ICON_READY       , VEH_LIGHT_READY         } ,
     {ICON_RIGHT       , VEH_INDICATOR_TURN_RIGHT} ,
+    {ICON_AUTO_BEAM   , VEH_AUTO_HEADLIGH       } ,
     {ICON_ECU     , VEH_LIGHT_ENGINE_FAULT  } ,
-    {ICON_TCS    , VEH_TCS_WARNING         } ,
+    {ICON_TCS    , VEH_TCS_WARNING         } ,               
     {ICON_ABS    , VEH_LIGHT_ABS           } ,
     {ICON_BRAKE       , VEH_LIGHT_BRAKE         } ,
-    {ICON_CC_STATUS   , VEH_CRUISE_MAIN_SWITCH       } ,
-    {ICON_VCU         , VEH_MCU_DTC            } ,
-    {ICON_BATTERY     , VEH_BAT_DTC_P1   } ,
-    {ICON_CHARGE      , VEH_CHARGER_STATUS} ,
 };
 
 static const int drvModeMaps[] = {
@@ -79,15 +75,14 @@ int32_t vehicle_get_data_rpm()
 }
 
 
-int32_t vehicle_get_data_gear()
+int32_t vehicle_get_data_gear() 
 {
 #if !ON_PC_CACLE
-    /* gear_e 数值即 VEH_GEAR_POSITION 原始编码, 直接透传; 非法值 clamp */
-    int32_t raw = vehicle_get_data(VEH_GEAR_POSITION);
-    return (raw < 0 || raw >= GEAR_MAX) ? GEAR_MAX : raw;
-#endif
+    int32_t gear_id = vehicle_get_data(VEH_GEAR_POSITION);
+    return (gear_id > GEAR_MAX) ?  GEAR_N : gear_id ;
+#endif 
 
-    return 0 ;
+    return 0 ; 
 
 }
 
@@ -97,12 +92,10 @@ int32_t vehicle_get_data_power()
 
 #if !ON_PC_CACLE
     int32_t power = vehicle_get_data(VEH_TRAM_POWR);
-    if(power < POWER_MIN)
-        power = POWER_MIN;
     return power > POWER_MAX ? POWER_MAX : power;
 #endif
 
-    return 30000 ; 
+    return 0 ; 
 }
 
 int32_t vehicle_get_data_drv_mode() 
@@ -112,90 +105,17 @@ int32_t vehicle_get_data_drv_mode()
     return drv_mode > DRV_MODE_S ? VEH_INVALID_VALUE : drvModeMaps[drv_mode] ;
 #endif
 
-    return 0 ;
+    return 0 ; 
 }
 
-///< 驾驶模式索引：直接透传 CAN VEH_DRIVE_MODE 原始编码 (0 normal / 1 eco / 2 sport)，
-///< 与 mode_index_e 的顺序一致，供 home_refresh_mode_index 使用。
-///< 不要改用 vehicle_get_data_drv_mode()：那个返回 drv_mode_e，其 0/1 顺序与
-///< mode_index_e 相反，会把 normal / eco 显示颠倒。
-int32_t vehicle_get_data_mode_index()
-{
-#if !ON_PC_CACLE
-    return vehicle_get_data(VEH_DRIVE_MODE);
-#endif
-
-    return 0 ;
-}
-
-int32_t vehicle_get_data_remain_battary()
+int32_t vehicle_get_data_remain_battary() 
 {
 #if !ON_PC_CACLE
     int32_t remain_battary = vehicle_get_data(VEH_TRAM_REMAIN_BATTARY);
     return remain_battary;
 #endif
 
-    return 0 ;
-}
-
-///< 各电池包 SOC(%)：pack 1/2/3 对应 BMS P1/P2/P3
-int32_t vehicle_get_data_bat_soc(uint8_t pack)
-{
-#if !ON_PC_CACLE
-    switch (pack) {
-        case 1: return vehicle_get_data(VEH_BAT_SOC_P1);
-        case 2: return vehicle_get_data(VEH_BAT_SOC_P2);
-        case 3: return vehicle_get_data(VEH_BAT_SOC_P3);
-    }
-#endif
-    return 0;
-}
-
-///< 故障码查询: BMS1/2/3 取各包 DTC 码, MCU 取 8bit 故障位图
-int32_t vehicle_get_fault_code(veh_fault_item_e item)
-{
-#if !ON_PC_CACLE
-    switch (item) {
-        case VEH_FAULT_BMS1: return vehicle_get_data(VEH_BAT_DTC_P1);
-        case VEH_FAULT_BMS2: return vehicle_get_data(VEH_BAT_DTC_P2);
-        case VEH_FAULT_BMS3: return vehicle_get_data(VEH_BAT_DTC_P3);
-        case VEH_FAULT_MCU:  return vehicle_get_data(VEH_MCU_DTC);
-        default: break;
-    }
-#endif
-    return 0;
-}
-
-///< CAN 弹窗消息码: 0 无, 1..N 对应 pop_tip_code_e
-int32_t vehicle_get_can_popup_msg(void)
-{
-#if !ON_PC_CACLE
-    return vehicle_get_data(VEH_CAN_POPUP_MSG);
-#endif
-    return 0;
-}
-
-void vehicle_set_can_popup_msg(int32_t code)
-{
-#if !ON_PC_CACLE
-    vehicle_set_data(VEH_CAN_POPUP_MSG, code);
-#endif
-}
-
-int32_t vehicle_get_battery_voltage(void)
-{
-#if !ON_PC_CACLE
-    return vehicle_get_data(VEH_VOLTAGE_BATTERY);
-#endif
-    return 0;
-}
-
-const char* veicle_get_data_version()
-{
-#if !ON_PC_CACLE
-    return get_soc_version();
-#endif
-    return " ";
+    return 0 ; 
 }
 
 #if 0 //暂未开启
@@ -209,6 +129,15 @@ int32_t vehicle_get_data_current_display()
 #endif
 
     return 0 ; 
+}
+
+
+const char* veicle_get_data_version()
+{
+#if !ON_PC_CACLE
+    return get_soc_version();
+#endif
+    return " ";
 }
 
 const char* veicle_get_data_mcu_ver()

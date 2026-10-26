@@ -5,8 +5,6 @@
 #include <ctype.h>
 #include <rtthread.h>
 #include "usr_utils.h"
-#include "dev_config.h"
-#include "app_log.h"
 
 static char build_date_time[32] = {0};
 
@@ -167,16 +165,64 @@ int is_valid_date(int year, int mon, int day) {
     return 1;
 }
 
-static char g_soc_version[64] = {0};
+#if 0
+///< MCU-DC001-GD_24.11.13V0 或者 MCU-DC001-GD_24.11.13
+int parse_mcu_ver_format_by_strtok(const char *ver, parse_info_t *info) {
+    if (ver == NULL || info == NULL) {
+        return -1;
+    }
 
-void soc_version_init(void) {
-    set_build_date_time();
+     const char *pstr = ver;
 
-    snprintf(g_soc_version, sizeof(g_soc_version), "%s%s%s", \
-            APP_VERSION_HEAD, get_build_date_time(), UI_VERSION);
-    rt_log_info("Cur soc version:%s\r\n", g_soc_version);
+    ///< 查找下划线
+    while (*pstr && *pstr != '_') {
+        pstr++;
+    }
+
+    if (!*pstr) {
+        return 0;
+    }
+
+    ///< 跳过下划线
+    pstr++; 
+
+    ///< 解析日期时间
+    if (!isdigit(*pstr) || !isdigit(*(pstr + 1)) || *(pstr + 2) != '.') {
+        return 0;
+    }
+
+    info->year = 2000 + ((pstr[0] - '0') * 10 + (pstr[1] - '0'));
+    pstr += 3;
+
+    if (!isdigit(*pstr) || !isdigit(*(pstr + 1)) || *(pstr + 2) != '.') {
+        return 0;
+    }
+
+    info->month = ((pstr[0] - '0') * 10 + (pstr[1] - '0'));
+    pstr += 3;
+
+    if (!isdigit(*pstr) || !isdigit(*(pstr + 1)) || *(pstr + 2) != '.') {
+        return 0;
+    }
+
+    info->day = ((pstr[0] - '0') * 10 + (pstr[1] - '0'));
+    pstr += 2;
+ 
+    int version_size = sizeof(info->version);
+    ///< 解析版本如有
+    if (info->version && (version_size > 0)) {
+        if (*pstr == 'V' || *pstr == 'v') {
+            pstr++;
+            int i = 0;
+            while (*pstr && i < version_size -1) {
+                info->version[i++] = *pstr++;
+            }
+            info->version[i] = '\0';
+        } else {
+            info->version[0] = '\0';
+        }
+    }
+    
+    return 1;
 }
-
-const char *get_soc_version(void) {
-    return g_soc_version;
-}
+#endif

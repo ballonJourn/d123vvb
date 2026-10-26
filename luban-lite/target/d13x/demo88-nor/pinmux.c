@@ -12,15 +12,6 @@
 #include <aic_utils.h>
 
 struct aic_pinmux aic_pinmux_config[] = {
-    /* LCD control pins as GPIO: PD.15(STBYB)/PD.16(RST)/PD.17(SLEEP) */
-    {1, PIN_PULL_DIS, 3, "PD.15"},
-    {1, PIN_PULL_DIS, 3, "PD.16"},
-    {1, PIN_PULL_DIS, 3, "PD.17"},
-    {1, PIN_PULL_DIS, 3, "PC.7"},
-    {1, PIN_PULL_DIS, 3, "PD.2"},   // BT_WIFI_PWR
-    // {1, PIN_PULL_DIS, 3, "PD.11"},  // TRUN_LEFT
-    // {1, PIN_PULL_DIS, 3, "PD.12"},  // TRUN_RIGHT
-    // {1, PIN_PULL_DIS, 3, "PE.17"},  // BATTERY_CHARGE_STATUS
 #ifdef AIC_USING_UART0
     /* uart0 */
     {5, PIN_PULL_DIS, 3, "PA.0"},
@@ -93,7 +84,8 @@ struct aic_pinmux aic_pinmux_config[] = {
 #else
    {8, PIN_PULL_DIS, 3, "PA.2"},   // BT_UART2_CTS
    {8, PIN_PULL_DIS, 3, "PA.3"},   // BT_UART2_RTS
-   //{1, PIN_PULL_DIS, 3, "PD.3"},   // BT_WIFI_ON
+   {1, PIN_PULL_DIS, 3, "PD.6"},   // BT_PWR_ON
+
 #endif
 #endif
 #ifdef AIC_USING_CAN0
@@ -310,7 +302,7 @@ struct aic_pinmux aic_pinmux_config[] = {
     {7, PIN_PULL_DIS, 3, "PD.15"},
 #endif
 #ifdef AIC_USING_EPWM7
-    //{7, PIN_PULL_DIS, 3, "PD.12"},
+    {7, PIN_PULL_DIS, 3, "PD.12"},
     {7, PIN_PULL_DIS, 3, "PD.13"},
 #endif
 #ifdef AIC_USING_EPWM8

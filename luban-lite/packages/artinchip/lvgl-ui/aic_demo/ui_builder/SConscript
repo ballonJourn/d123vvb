@@ -2,9 +2,6 @@ from building import *
 import os
 
 cwd = GetCurrentDir()
-# UI 分辨率目录开关（切换分辨率改此处即可）
-# UI_RES_DIR = '1024x600'
-UI_RES_DIR = '800x480'
 group = []
 CPPPATH = [cwd]
 CPPPATH += [cwd + '/custom']
@@ -13,10 +10,8 @@ CPPPATH += [cwd + '/view']
 CPPPATH += [cwd + '/view/home_view']
 CPPPATH += [cwd + '/view/setting_view']
 CPPPATH += [cwd + '/view/phone_view']
-CPPPATH += [cwd + '/view/pop_tip_view']
 CPPPATH += [cwd + '/proxy']
 CPPPATH += [cwd + '/logic']
-CPPPATH += [cwd + '/' + UI_RES_DIR]
 
 src  = Glob('*.c')
 src += Glob('custom/*.c')
@@ -25,10 +20,8 @@ src += Glob('view/*.c')
 src += Glob('view/home_view/*.c')
 src += Glob('view/setting_view/*.c')
 src += Glob('view/phone_view/*.c')
-src += Glob('view/pop_tip_view/*.c')
 src += Glob('proxy/*.c')
 src += Glob('logic/*.c')
-src += Glob(UI_RES_DIR + '/*.c')
 
 list = os.listdir(cwd)
 for d in list:
@@ -41,7 +34,7 @@ if GetDepend(['LVGL_STORAGE_PATH']):
 else:
     ins_dst='rodata/lvgl_data'
 
-ins_src = UI_RES_DIR + '/assets/'
+ins_src = 'assets/'
 install = [(ins_src, ins_dst)]
 
 group = group + DefineGroup('LVGL-port', src, depend = ['HCN_D123BBV_DEMO'], CPPPATH = CPPPATH,

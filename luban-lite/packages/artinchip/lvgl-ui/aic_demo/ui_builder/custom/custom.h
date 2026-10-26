@@ -15,7 +15,7 @@ extern "C" {
 #include "aic_ui.h"
 #include "ui_util.h"
 
-// #define TOUCH_SCREEN
+#define TOUCH_SCREEN
 
 void custom_init();
 

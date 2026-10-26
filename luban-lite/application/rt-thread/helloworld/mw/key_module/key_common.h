@@ -9,6 +9,8 @@ extern "C" {
 #include <stdbool.h>
 #include "dev_config.h"
 
+#if MW_ADC_KEY_ENABLE
+
 /**
  * @brief 按键事件枚举
  */
@@ -31,8 +33,6 @@ typedef enum {
     COM_KEY_SHORT_PR1 = 0x14,
     COM_KEY_LONG_PR1 = 0x15,
     SET_KEY_SUPER_LONG_PR = 0x16,
-    UP_KEY_SUPER_LONG_PR = 0x17,
-    HOME_KEY_SHORT_PR = 0x18,
 } key_event_e;
 
 typedef uint8_t key_event_t_;
@@ -46,6 +46,8 @@ typedef void (*key_event_cb_t)(key_event_t_);
 int set_key_event_cb(key_event_cb_t event_cb);
 
 void send_key_event(uint8_t key_event);
+
+#endif
 
 #ifdef __cplusplus
 }

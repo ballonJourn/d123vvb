@@ -3,7 +3,6 @@
 #include <rtdevice.h>
 #include "mile_param.h"
 #include "set_param.h"
-#include "vehicle_param.h"
 #include "ign_check.h"
 #include "power_manage.h"
 #include "app_log.h"
@@ -28,24 +27,11 @@
 
 static uint32_t power_pin = 0;
 static uint32_t ign_det_pin = 0;
-static uint32_t ign_power_ctrl = 0;
 
 static ign_state_t g_ign_state = IGN_STATE_UNKNOWN;  
 static bool is_power_on = false;                               
 
-#if POWER_LOW_SLEEP_ENABLE
 extern struct rt_event usr_pm_event;
-#endif
-
-static void ign_power_ctrl_off(void) {
-    if (ign_power_ctrl == 0) {
-        rt_log_error("ign power ctrl pin not init\n");
-        return;
-    }
-
-    rt_pin_mode(ign_power_ctrl, PIN_MODE_OUTPUT);
-    rt_pin_write(ign_power_ctrl, PIN_LOW);
-}
 
 static void power_enable(bool enable) {
     if (power_pin == 0) {
@@ -58,59 +44,23 @@ static void power_enable(bool enable) {
     is_power_on = enable;
 }
 
-///< 下电清零: 清零方式为"下电清零"时, 把 trip 写 0 并置"里程已变"标志。
-///< 只写里程参数 + 标志, 不碰 LVGL —— 显示刷新由 UI 线程(50ms 定时器)按标志重读,
-///< 本线程栈只有 1024 字节, 且此后系统随即休眠
-static void reset_trip_on_power_off(void) {
-    uint8_t reset_type = RESET_TYPE_BY_BUTTON;
-    uint32_t trip = 0;
-
-    if (!get_usr_param(USR_PARAM_RESET_TYPE, &reset_type)) {
-        rt_log_error("Get reset_type error!\n");
-        return;
-    }
-
-    if (reset_type != RESET_TYPE_AFTER_POWER_OFF) {
-        return;
-    }
-
-    if (!set_mile_param(MILE_PARAM_TRIP, &trip)) {
-        rt_log_error("Clear trip data error!\n");
-        return;
-    }
-
-    ///< 1:trip a 已变 (ui_builder 侧据此重读并刷新显示)
-    vehicle_set_data(VEH_MILEAGE_CHANGE_MSG, 1);
-    rt_log_info("trip cleared on power off\n");
-}
-
 static void on_ign_state_changed(ign_state_t new_state) {
     if (new_state == IGN_STATE_ON) {
         if (!is_power_on) {
-            //power_enable(true);
+            power_enable(true);
         }
 
-#if POWER_LOW_SLEEP_ENABLE
          rt_event_send(&usr_pm_event, PM_EVENT_IGN_ON);
-#endif
 
     } else if (new_state == IGN_STATE_OFF) {
         if (is_power_on) {
-            ///< 下电清零: 先清零 trip 再落盘用户参数
-            reset_trip_on_power_off();
-
+            #if 0
+            rt_thread_mdelay(2000);   
+            #else
             ///< 保存设置参数和里程参数
-            if (shutdown_save_usr_param() == 0) {
-                rt_log_info("dev will power off!\n");
-                //ign_power_ctrl_off();
-            } else {
-                rt_log_info("try 2 times save set param failed, dev will power off after 300ms!\n");
-                rt_thread_mdelay(300);
-                //ign_power_ctrl_off();
-            }
-#if POWER_LOW_SLEEP_ENABLE
+            #endif
+            //power_enable(false);
             rt_event_send(&usr_pm_event, PM_EVENT_IGN_OFF);
-#endif
         }
     }
 }
@@ -162,14 +112,6 @@ static void power_pin_init(void) {
     power_enable(true);
 }
 
-static void ign_power_ctrl_init(void) {
-    ign_power_ctrl = rt_pin_get(IGN_POWER_CTRL);
-    if (ign_power_ctrl == 0) {
-        rt_log_error("Failed to get ign power ctrl pin %s\n", IGN_POWER_CTRL);
-        return;
-    }
-}
-
 static void ign_det_init(void) {
     ign_det_pin = rt_pin_get(IGN_DET_PIN);
     if (ign_det_pin == 0) {
@@ -180,8 +122,9 @@ static void ign_det_init(void) {
 }
 
 int ign_check_init(void) {
+    power_pin_init();
     ign_det_init();
-    ign_power_ctrl_init();
+
     rt_thread_t ign_task = RT_NULL;
     ign_task = rt_thread_create("ign_det",
                                 ign_scan_thread,

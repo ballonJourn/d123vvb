@@ -5,7 +5,6 @@
 #include "dev_state.h"
 #include "vehicle_data.h"
 #include "home_view_interface.h"
-#include "power_view.h"
 #include "custom.h"
 
 #define SELF_CHECK_DURATION 2500 
@@ -26,8 +25,6 @@ static double half_check_count;
 // static double rpm_div;
 static double speed_div;
 static double elec_div;
-static double power_div;
-static double bat_div;   /* 电池弧 SOC 自检步进 */
 
 static void handle_state_idle() {
   // TODO: Implement idle state logic if needed
@@ -48,8 +45,7 @@ static void handle_state_waiting() {
     {   //boot animation播放完毕
         manager.state      = CHECK_STATE_CHECKING;
         manager.start_tick = lv_tick_get();
-        /* 新 home_page (1024x600) 没有 cartoon_image 控件，
-         * 不再创建 50ms 的卡通帧定时器 */
+        animation_init();
         printf("selfcheck start\n");
     }
 
@@ -72,18 +68,11 @@ static void handle_state_checking() {
     // int rpm_value   = (int)(count * rpm_div);
     int speed_value = (int)(count * speed_div);
     int elec_value  = (int)(count * elec_div );
-    int bat_value   = (int)(count * bat_div );
-    int power_valude = (int)((POWER_MAX - POWER_MIN) / 100) * elec_value + POWER_MIN;
-    // printf(" handle_state_checking power_valude = %d\n" , power_valude);
+    // printf(" handle_state_checking rpm_value = %d speed_value = %d\n" , rpm_value , speed_value);
     // home_refresh_rpm(rpm_value)  ;
 
     home_refresh_speed(speed_value > SPEED_MAX ? SPEED_MAX : speed_value);
-    home_refresh_speed_power(power_valude > POWER_MAX ? POWER_MAX : power_valude);
-    // home_refresh_electrical(elec_value > ELECTRI_MAX ? ELECTRI_MAX : elec_value);
-    /* 电池弧自检：三弧三指针同步扫动（0→100→0），参考速度仪表 */
-    home_refresh_battery(bat_value > 100 ? 100 : bat_value,
-                         bat_value > 100 ? 100 : bat_value,
-                         bat_value > 100 ? 100 : bat_value);
+    home_refresh_electrical(elec_value > ELECTRI_MAX ? ELECTRI_MAX : elec_value);
 
     return ;
 }
@@ -143,11 +132,9 @@ void selfcheck_init() {
     // rpm_div             = (double)(RPM_MAX )   / half_check_count;
     speed_div           = (double)(SPEED_MAX) / half_check_count;
     elec_div            = (double)(ELECTRI_MAX) / half_check_count;
-    bat_div             = (double)(100) / half_check_count;
 
     home_refresh_signal_visible(true);
     home_refresh_speed(0);
-    home_refresh_battery(0, 0, 0);
 
     manager.timer_id    = lv_timer_create(on_handle_timer, SELF_CHECK_INTERVAL , NULL);
     if (manager.timer_id == NULL) {

@@ -26,17 +26,15 @@ static char  path[ANI_IMAGE_PATH] = {0};
 
 static void on_animation_timer(struct _lv_timer_t * timer)
 {
-    // if (checkself_get_state() != CHECK_STATE_FINISHED /*|| get_demonstration_state()*/ )
+    // if (checkself_get_state() != CHECK_STATE_FINISHED /*|| get_demonstration_state()*/ ) 
     //     return  ;
 
     home_page_t *page = home_page_get(&ui_manager) ;
-    /* 新 home_page (1024x600) 没有 cartoon_image 控件 —— 静默 return，
-     * 避免每 50ms 一条 ERROR 噪音 */
-    if (!page || !page->cartoon_image) return;
+    VIEW_MEMBER_VALID(page, cartoon_image) 
 
     lv_snprintf(path + len, ANI_IMAGE_PATH - len - 1, "%03d.png" , current_image_index);
     // LV_LOG_INFO("imagepath[len] = %c path - 5 = %s\n" ,path[len -1], path + len - 5) ;
-    lv_image_set_src(page->cartoon_image , path) ;
+    lv_image_set_src(cartoon_image , path) ;
 
     current_image_index = (current_image_index + 1) % max_image_count ;
 }
@@ -93,65 +91,11 @@ void animation_set_theme(cartoon_theme_e theme)
     animation_init() ;
 }
  
-void animation_set_state(cartoon_state_e state)
+void animation_set_state(cartoon_state_e state) 
 {
     if (state > CARTOON_STATE_RUNNING)
         return ;
-
+    
     current_state = state ;
     animation_init() ;
-}
-
-/* =========================================================================
- * 移植自 AWTK home_view 的 move/breath 动画
- *   move_speed_out/in: speed_view x 切换 (303↔586)
- *   move_power_out/in: power_view x 切换 (688↔1024)
- *   move_dock_out/in:  dock_slider width 切换 (336↔648)
- *   转向灯 breath: 4s ease_in_out 来回
- * ========================================================================= */
-static void anim_x_cb(void *var, int32_t v) { lv_obj_set_x((lv_obj_t *)var, v); }
-static void anim_w_cb(void *var, int32_t v) { lv_obj_set_width((lv_obj_t *)var, v); }
-static void anim_opa_cb(void *var, int32_t v) {
-    lv_obj_set_style_opa((lv_obj_t *)var, (lv_opa_t)v, 0);
-}
-
-void home_anim_move_x(void *obj, int32_t from, int32_t to, uint32_t ms)
-{
-    if (!obj) return;
-    lv_anim_t a = {0};
-    lv_anim_init(&a);
-    lv_anim_set_var(&a, obj);
-    lv_anim_set_values(&a, from, to);
-    lv_anim_set_duration(&a, ms);
-    lv_anim_set_path_cb(&a, lv_anim_path_linear);
-    lv_anim_set_exec_cb(&a, anim_x_cb);
-    lv_anim_start(&a);
-}
-
-void home_anim_move_w(void *obj, int32_t from, int32_t to, uint32_t ms)
-{
-    if (!obj) return;
-    lv_anim_t a = {0};
-    lv_anim_init(&a);
-    lv_anim_set_var(&a, obj);
-    lv_anim_set_values(&a, from, to);
-    lv_anim_set_duration(&a, ms);
-    lv_anim_set_path_cb(&a, lv_anim_path_linear);
-    lv_anim_set_exec_cb(&a, anim_w_cb);
-    lv_anim_start(&a);
-}
-
-void home_anim_breath(void *obj, uint32_t period_ms)
-{
-    if (!obj) return;
-    lv_anim_t a = {0};
-    lv_anim_init(&a);
-    lv_anim_set_var(&a, obj);
-    lv_anim_set_values(&a, LV_OPA_TRANSP, LV_OPA_COVER);
-    lv_anim_set_duration(&a, period_ms / 2);
-    lv_anim_set_playback_duration(&a, period_ms / 2);
-    lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
-    lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
-    lv_anim_set_exec_cb(&a, anim_opa_cb);
-    lv_anim_start(&a);
 }

@@ -31,33 +31,12 @@ void home_refresh_odo(double odo)
     return  ;
 }
 
-void home_refresh_mileage_unit(unit_e unit)
+void home_refresh_mileage_unit(unit_e unit) 
 {
     home_page_t *page = home_page_get(&ui_manager) ;
-    VIEW_MEMBER_VALID(page, odo_unit)
-    VIEW_MEMBER_VALID(page, trip_unit)
+    VIEW_MEMBER_VALID(page, odo_unit) 
+    VIEW_MEMBER_VALID(page, trip_unit) 
     lv_label_set_text(odo_unit , (unit == KM_H) ? "km" : "mile" );
     lv_label_set_text(trip_unit, (unit == KM_H) ? "km" : "mile" );
-    return  ;
-}
-
-/* 续航里程: 数值与单位写在同一个 label, value < 0 表示无效 */
-void home_refresh_range(int32_t value, unit_e unit)
-{
-    home_page_t *page = home_page_get(&ui_manager) ;
-    VIEW_MEMBER_VALID(page, range_lab)
-
-    char range_value_str[16] = " " ;
-    const char *unit_str = (unit == KM_H) ? "km" : "mile" ;
-
-    if (value < 0) {
-        snprintf(range_value_str, sizeof(range_value_str), "--%s", unit_str) ;
-    } else {
-        snprintf(range_value_str, sizeof(range_value_str), "%d%s",
-                 (int)value, unit_str) ;
-    }
-
-    lv_label_set_text(range_lab, range_value_str) ;
-
     return  ;
 }

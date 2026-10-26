@@ -1,12 +1,12 @@
 {
     "spi-nor": { // Device, The name should be the same with string in image:info:media:type
-        "size": "32m", // Size of SPI NOR
+        "size": "16m", // Size of SPI NOR
         "partitions": {
             "spl":        { "size": "512k" },
             "env":        { "size": "128k" },
             "env_r":      { "size": "128k" },
-            "os":         { "size": "6m" },
-            "rodata":     { "size": "12m" },
+            "os":         { "size": "4m" },
+            "rodata":     { "size": "9m" },
             "temp":       { "size": "1m" },
             "data":       { "size": "1m" }
         },

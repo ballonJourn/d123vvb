@@ -2,7 +2,6 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
-#include <rtdef.h>
 #include "dev_config.h"
 #include "mw_log.h"
 #include "json_param_parse.h"
@@ -10,8 +9,6 @@
 #include "json_utils.h"
 #include "set_param.h"
 #include "find_file_name.h"
-
-extern int msh_exec(char *cmd, rt_size_t length);
 
 #define return_if_fail(p, main_object, sub_object) 				   \
   if (!(p)) {                               	   				   \
@@ -32,40 +29,6 @@ static usr_param_t set_param;
 static char car_model[NAME_STR_LEN] = {0};
 static char param_ver[NAME_STR_LEN] = {0};
 static char src_path[128] = {0};
-
-/**
- * @brief  "AABBCCDDEEFF" -> 6 字节
- * @return false: 字符串长度或字符非法(调用方应保留原值)
- */
-static bool mac_str_to_bytes(const char *str, uint8_t *out, uint8_t len) {
-	if (str == NULL || out == NULL) {
-		return false;
-	}
-
-	if (strlen(str) != (size_t)(len * 2)) {
-		return false;
-	}
-
-	for (uint8_t i = 0; i < len; i++) {
-		char byte_str[3] = { str[2 * i], str[2 * i + 1], '\0' };
-		char *end = NULL;
-		long val = strtol(byte_str, &end, 16);
-
-		if (end == byte_str || *end != '\0') {
-			return false;
-		}
-		out[i] = (uint8_t)val;
-	}
-
-	return true;
-}
-
-/** @brief 6 字节 -> "AABBCCDDEEFF" (str 需 2*len+1 字节) */
-static void mac_bytes_to_str(const uint8_t *mac, uint8_t len, char *str) {
-	for (uint8_t i = 0; i < len; i++) {
-		sprintf(&str[2 * i], "%02X", mac[i]);
-	}
-}
 
 static char * open_param_file(const char * file_path, const char *mode) {
     if (file_path && mode) {
@@ -159,7 +122,12 @@ static bool read_json_data(char *data) {
 		set_param.usr_set.phone_type = idata;
 
 		temp = cJSON_GetObjectItemCaseSensitive(main_object, S_BT_SWITCH);
-		return_value_if_fail(temp != NULL, SYSTEM_OBJECT, S_BT_SWITCH, false);
+		return_value_if_fail(temp != NULL, SYSTEM_OBJECT, S_BT_SWITCH, false);		
+		idata = (uint8_t)cJSON_GetNumberIntValue(temp);
+		set_param.usr_set.language = idata;
+
+		temp = cJSON_GetObjectItemCaseSensitive(main_object, S_BT_SWITCH);
+		return_value_if_fail(temp != NULL, SYSTEM_OBJECT, S_BT_SWITCH, false);		
 		idata = (uint8_t)cJSON_GetNumberIntValue(temp);
 		set_param.usr_set.bt_switch = idata;
 
@@ -204,17 +172,9 @@ static bool read_json_data(char *data) {
 		set_param.usr_set.sys_log = idata;
 
 		temp = cJSON_GetObjectItemCaseSensitive(main_object, S_DRIVE_MODE);
-		return_value_if_fail(temp != NULL, SYSTEM_OBJECT, S_DRIVE_MODE, false);
+		return_value_if_fail(temp != NULL, SYSTEM_OBJECT, S_DRIVE_MODE, false);		
 		idata = (uint8_t)cJSON_GetNumberIntValue(temp);
 		set_param.usr_set.drive_mode = idata;
-
-		///< reset_type: 老配置无该键时用默认值 0 (按键清零) 兜底, 不能走
-		///< return_value_if_fail —— 否则整份解析失败会让全部用户参数一起不可用
-		set_param.usr_set.reset_type = 0;
-		temp = cJSON_GetObjectItemCaseSensitive(main_object, S_RESET_TYPE);
-		if (cJSON_IsNumber(temp)) {
-			set_param.usr_set.reset_type = (uint8_t)cJSON_GetNumberIntValue(temp);
-		}
 
 		memset(str, 0, sizeof(str));
 		snprintf(str, sizeof(str), "%s%d", INT_RESERVE_SUB_OBJECT, 10);
@@ -270,7 +230,7 @@ static bool read_json_data(char *data) {
 		temp = cJSON_GetObjectItemCaseSensitive(main_object, T_R_R_PRESSURE);
 		return_value_if_fail(temp != NULL, TPMS_OBJECT, T_R_R_PRESSURE, false);
 		data = (uint16_t)cJSON_GetNumberIntValue(temp);
-		set_param.tpms[3].tpms_pressure = data;
+		set_param.tpms[2].tpms_pressure = data;
 
 		temp = cJSON_GetObjectItemCaseSensitive(main_object, T_L_F_TEMP);
 		return_value_if_fail(temp != NULL, TPMS_OBJECT, T_L_F_TEMP, false);
@@ -291,18 +251,6 @@ static bool read_json_data(char *data) {
 		return_value_if_fail(temp != NULL, TPMS_OBJECT, T_R_R_TEMP, false);
 		data = (int8_t)cJSON_GetNumberIntValue(temp);
 		set_param.tpms[3].tpms_temp = data;
-
-		///< 蓝牙胎压 MAC: 老配置里没有这两个键, 不能走 return_value_if_fail
-		///< —— 否则整份 JSON 解析失败会让全部用户参数一起不可用
-		temp = cJSON_GetObjectItemCaseSensitive(main_object, T_L_F_MAC);
-		if (temp != NULL && cJSON_IsString(temp)) {
-			mac_str_to_bytes(temp->valuestring, set_param.bt_tpms_mac[0], BT_TPMS_MAC_LEN);
-		}
-
-		temp = cJSON_GetObjectItemCaseSensitive(main_object, T_L_R_MAC);
-		if (temp != NULL && cJSON_IsString(temp)) {
-			mac_str_to_bytes(temp->valuestring, set_param.bt_tpms_mac[1], BT_TPMS_MAC_LEN);
-		}
 	} else {
 		return_value_if_fail(main_object != NULL, TPMS_OBJECT, "main_json", false);
 	}
@@ -418,14 +366,12 @@ static bool read_json_data(char *data) {
 	}
 
 	///< reserve
-	///< 注: pads1 由 36 字节缩为 6 字节 (原后 30 字节让给 ref_mile_arr),
-	///< 故此处只读 reserve0~reserve5; 原 reserve1 段 (写 pads1[8..13]) 已删除
 	main_object = cJSON_GetObjectItemCaseSensitive(json, RESERVE_OBJECT);
 	if (cJSON_IsObject(main_object)) {
 		cJSON *temp;
 		uint8_t idata = 0;
 
-		for (i = 0; i < 6; i++) {
+		for (i = 0; i < 8; i++) {
 			memset(str, 0, sizeof(str));
 			snprintf(str, sizeof(str), "%s%d", RESERVE_SUB_OBJECT, i);
 			temp = cJSON_GetObjectItemCaseSensitive(main_object, str);
@@ -436,29 +382,23 @@ static bool read_json_data(char *data) {
 	} else {
 		return_value_if_fail(main_object != NULL, RESERVE_OBJECT, "main_json", false);
 	}
-
-	///< ref_mile: 三包参考里程数组 (8bit × 0.01km)
-	///< 老配置里无该 section / 单键时用默认值兜底, 故不能走 return_value_if_fail
-	///< —— 否则整份 JSON 解析失败会让 is_recovery_usr_param 恒为 false,
-	///< 亮度/主题/胎压等全部用户参数一起不可用
-	memset(set_param.ref_mile_arr, REF_MILE_ARR_DEFAULT,
-	       sizeof(set_param.ref_mile_arr));
-	main_object = cJSON_GetObjectItemCaseSensitive(json, REF_MILE_OBJECT);
+	
+	///< reserve1
+	main_object = cJSON_GetObjectItemCaseSensitive(json, RESERVE1_OBJECT);
 	if (cJSON_IsObject(main_object)) {
 		cJSON *temp;
-		int p, m;
+		uint8_t idata = 0;
+		for (i = 0; i < 6; i++) {
+			memset(str, 0, sizeof(str));
+			snprintf(str, sizeof(str), "%s%d", INT_RESERVE_SUB_OBJECT, i);
 
-		for (p = 0; p < REF_MILE_PACK_NUM; p++) {
-			for (m = 0; m < REF_MILE_ARR_NUM; m++) {
-				memset(str, 0, sizeof(str));
-				snprintf(str, sizeof(str), REF_MILE_SUB_FMT, p + 1, m);
-				temp = cJSON_GetObjectItemCaseSensitive(main_object, str);
-				if (cJSON_IsNumber(temp)) {
-					set_param.ref_mile_arr[p][m] =
-						(uint8_t)cJSON_GetNumberIntValue(temp);
-				}
-			}
+			temp = cJSON_GetObjectItemCaseSensitive(main_object, str);
+			return_value_if_fail(temp != NULL, RESERVE_OBJECT, str, false);
+			idata = (uint8_t)cJSON_GetNumberIntValue(temp);
+			set_param.pads1[8 + i] = idata;
 		}
+	} else {
+		return_value_if_fail(main_object != NULL, RESERVE1_OBJECT, "main_json", false);
 	}
 
     cJSON_Delete(json);
@@ -485,8 +425,6 @@ static void set_default_param(usr_param_t *param) {
         param->usr_set.sys_log = 0;
         param->usr_set.time_format = 1;
 		snprintf(param->carlink_uuid, 20, "%s", " ");
-        memset(param->ref_mile_arr, REF_MILE_ARR_DEFAULT,
-               sizeof(param->ref_mile_arr));
 	}
 }
 
@@ -593,14 +531,6 @@ static bool write_json_data(char *data, const char *file_path) {
 		if (cJSON_IsNumber(writeTmp)) {
 			cJSON_SetIntValue(writeTmp, set_param.usr_set.drive_mode);
 		}
-
-		///< reset_type: 老 /temp 文件缺键时补建, 配合 read 侧兜底完成迁移
-		writeTmp = cJSON_GetObjectItemCaseSensitive(item, S_RESET_TYPE);
-		if (cJSON_IsNumber(writeTmp)) {
-			cJSON_SetIntValue(writeTmp, set_param.usr_set.reset_type);
-		} else {
-			cJSON_AddNumberToObject(item, S_RESET_TYPE, set_param.usr_set.reset_type);
-		}
 		///< reserve0 int_reserve0
 		///< to do
 	}
@@ -666,28 +596,6 @@ static bool write_json_data(char *data, const char *file_path) {
 		writeTmp = cJSON_GetObjectItemCaseSensitive(item, T_R_R_TEMP);
 		if (cJSON_IsNumber(writeTmp)) {
 			cJSON_SetIntValue(writeTmp, set_param.tpms[3].tpms_temp);
-		}
-
-		///< 蓝牙胎压传感器 MAC: 存在就改, 老配置缺键时补建,
-		///< 否则配对结果永远写不进文件 (重启后配对丢失)
-		{
-			char mac_str[BT_TPMS_MAC_LEN * 2 + 1] = {0};
-
-			mac_bytes_to_str(set_param.bt_tpms_mac[0], BT_TPMS_MAC_LEN, mac_str);
-			writeTmp = cJSON_GetObjectItemCaseSensitive(item, T_L_F_MAC);
-			if (cJSON_IsString(writeTmp)) {
-				json_utils_modify_string(item, T_L_F_MAC, mac_str);
-			} else {
-				cJSON_AddStringToObject(item, T_L_F_MAC, mac_str);
-			}
-
-			mac_bytes_to_str(set_param.bt_tpms_mac[1], BT_TPMS_MAC_LEN, mac_str);
-			writeTmp = cJSON_GetObjectItemCaseSensitive(item, T_L_R_MAC);
-			if (cJSON_IsString(writeTmp)) {
-				json_utils_modify_string(item, T_L_R_MAC, mac_str);
-			} else {
-				cJSON_AddStringToObject(item, T_L_R_MAC, mac_str);
-			}
 		}
 		
 		// reserve0 int_reserve0
@@ -771,33 +679,6 @@ static bool write_json_data(char *data, const char *file_path) {
 		writeTmp = cJSON_GetObjectItemCaseSensitive(item, R_RIDE_TIME_B);
 		if (cJSON_IsNumber(writeTmp)) {
 			cJSON_SetIntValue(writeTmp, set_param.ride_info.ride_time_b);
-		}
-	}
-
-	///< ref_mile: 三包参考里程数组 (8bit × 0.01km)
-	///< 老配置缺该 section / 单键时补建 (否则永远写不进去), 下电保存后即完整
-	{
-		int p, m;
-		char ref_str[32] = {0};
-
-		item = cJSON_GetObjectItemCaseSensitive(json, REF_MILE_OBJECT);
-		if (!cJSON_IsObject(item)) {
-			item = cJSON_CreateObject();
-			cJSON_AddItemToObject(json, REF_MILE_OBJECT, item);
-		}
-
-		for (p = 0; p < REF_MILE_PACK_NUM; p++) {
-			for (m = 0; m < REF_MILE_ARR_NUM; m++) {
-				memset(ref_str, 0, sizeof(ref_str));
-				snprintf(ref_str, sizeof(ref_str), REF_MILE_SUB_FMT, p + 1, m);
-				writeTmp = cJSON_GetObjectItemCaseSensitive(item, ref_str);
-				if (cJSON_IsNumber(writeTmp)) {
-					cJSON_SetIntValue(writeTmp, set_param.ref_mile_arr[p][m]);
-				} else {
-					cJSON_AddNumberToObject(item, ref_str,
-					                        set_param.ref_mile_arr[p][m]);
-				}
-			}
 		}
 	}
 
@@ -940,7 +821,7 @@ static bool read_src_config(void) {
 							SET_PARAM_PREFIX, name_spilt[1],
 							name_spilt[2], CONFIG_FILE_SUFFIX);
 	#endif
-						msh_exec(cmd_str, strlen(cmd_str));
+						system(cmd_str);
 
 						memset(cmd_str, 0, sizeof(cmd_str));
 	#ifndef _WIN32
@@ -948,7 +829,7 @@ static bool read_src_config(void) {
 	#else
 						snprintf(cmd_str, sizeof(cmd_str), "copy  %s %s",src_path, str);	
 	#endif
-						msh_exec(cmd_str, strlen(cmd_str));
+						system(cmd_str);
 						printf("car model or param ver is diffrent, mv config file...\n");
 					} else if ((strcmp(name_spilt[1], car_model) == 0) 
 						&& (strcmp(name_spilt[2], param_ver) == 0)) {
@@ -956,7 +837,7 @@ static bool read_src_config(void) {
 	#ifndef _WIN32
 						snprintf(cmd_str, sizeof(cmd_str), "rm %s", src_path);	
 						printf("sys tem str:%s\r\n", cmd_str);
-						msh_exec(cmd_str, strlen(cmd_str));
+						system(cmd_str);
 	#endif
 					}
 
@@ -979,7 +860,7 @@ static bool read_src_config(void) {
 					WIN32_DEST_CONFIG_PATH, file_name);
 	#endif
 				printf("2: Delete other model config:%s\n", str);
-				msh_exec(str, strlen(str));
+				system(str);
 			}
 		}
 	}
@@ -1005,7 +886,7 @@ static bool read_src_config(void) {
 
 #endif
 		printf("cmd_str:%s\r\n", cmd_str);
-		ret = msh_exec(cmd_str, strlen(cmd_str));
+		ret = system(cmd_str);
 		printf("ret = %d\r\n", ret);
 		if (ret == 0) {
 			printf("Mv %s config json success\n", str);
@@ -1069,7 +950,7 @@ static bool read_dest_config(void) {
 				WIN32_ROOT_PATH, WIN32_DEST_CONFIG_PATH, file_name);
 
 #endif
-			msh_exec(str, strlen(str));
+			system(str);
 			printf("4:Delete other model config:%s\n", str);
 		}
 	}
@@ -1110,7 +991,6 @@ static void set_default_config(void) {
 	cJSON_AddNumberToObject(sec_json, S_AUTO_HEADLIGHT, set_param.usr_set.auto_headlight);
 	cJSON_AddNumberToObject(sec_json, S_SYS_LOG, set_param.usr_set.sys_log);
 	cJSON_AddNumberToObject(sec_json, S_DRIVE_MODE, set_param.usr_set.drive_mode);
-	cJSON_AddNumberToObject(sec_json, S_RESET_TYPE, set_param.usr_set.reset_type);
 
 	for (i = 0; i < 11; i++) {
 		memset(str_temp, 0, sizeof(str_temp));
@@ -1134,16 +1014,6 @@ static void set_default_config(void) {
 	cJSON_AddNumberToObject(sec_json, T_L_R_TEMP, set_param.tpms[1].tpms_temp);
 	cJSON_AddNumberToObject(sec_json, T_R_F_TEMP, set_param.tpms[2].tpms_temp);
 	cJSON_AddNumberToObject(sec_json, T_R_R_TEMP, set_param.tpms[3].tpms_temp);
-
-	///< 蓝牙胎压传感器 MAC (12 位 hex 字符串)
-	{
-		char mac_str[BT_TPMS_MAC_LEN * 2 + 1] = {0};
-
-		mac_bytes_to_str(set_param.bt_tpms_mac[0], BT_TPMS_MAC_LEN, mac_str);
-		cJSON_AddStringToObject(sec_json, T_L_F_MAC, mac_str);
-		mac_bytes_to_str(set_param.bt_tpms_mac[1], BT_TPMS_MAC_LEN, mac_str);
-		cJSON_AddStringToObject(sec_json, T_L_R_MAC, mac_str);
-	}
 
 	for (i = 0; i < 4; i++) {
 		memset(str_temp, 0, sizeof(str_temp));
@@ -1199,26 +1069,23 @@ static void set_default_config(void) {
 	cJSON_AddNumberToObject(sec_json, str_temp, 0);
 	cJSON_AddItemToObject(json, UUID_INFO_OBJECT, sec_json);
 
-	///< reserve (pads1 已缩为 6 字节, 故只生成 reserve0~reserve5; 原 reserve1 段已删除)
+	///< reserve
 	sec_json = cJSON_CreateObject();
-	for (i = 0; i < 6; i++) {
+	for (i = 0; i < 8; i++) {
 		memset(str_temp, 0, sizeof(str_temp));
 		snprintf(str_temp, sizeof(str_temp), "%s%d", RESERVE_SUB_OBJECT, i);
 		cJSON_AddNumberToObject(sec_json, str_temp, 0);
 	}
 	cJSON_AddItemToObject(json, RESERVE_OBJECT, sec_json);
 
-	///< ref_mile: 三包参考里程数组, 默认 1.00km
+	///< reserve1
 	sec_json = cJSON_CreateObject();
-	for (i = 0; i < REF_MILE_PACK_NUM; i++) {
-		int m;
-		for (m = 0; m < REF_MILE_ARR_NUM; m++) {
-			memset(str_temp, 0, sizeof(str_temp));
-			snprintf(str_temp, sizeof(str_temp), REF_MILE_SUB_FMT, i + 1, m);
-			cJSON_AddNumberToObject(sec_json, str_temp, REF_MILE_ARR_DEFAULT);
-		}
+	for (i = 0; i < 6; i++) {
+		memset(str_temp, 0, sizeof(str_temp));
+		snprintf(str_temp, sizeof(str_temp), "%s%d", INT_RESERVE_SUB_OBJECT, i);
+		cJSON_AddNumberToObject(sec_json, str_temp, 0);
 	}
-	cJSON_AddItemToObject(json, REF_MILE_OBJECT, sec_json);
+	cJSON_AddItemToObject(json, RESERVE1_OBJECT, sec_json);
 
 	char *json_str = cJSON_Print(json);
 	fprintf(param_file, "%s", json_str);

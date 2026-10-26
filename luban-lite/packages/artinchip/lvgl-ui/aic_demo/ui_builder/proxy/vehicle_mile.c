@@ -1,9 +1,13 @@
 #include "vehicle_mile.h"
 #include "vehicle_data.h"
 #include "vehicle_param.h"
-#include "mile_param.h"
-#include "set_param.h"
 
+#undef ON_PC_CACLE
+#define ON_PC_CACLE 1
+
+static double odo_value = 0.0  ;
+static double tripA = 0.0 ;
+static double tripB = 0.0 ;
 
 ///< false:参数未准备好 true:已准备好
 bool vehicle_get_mile_recovery()
@@ -20,21 +24,21 @@ uint32_t vehicle_get_mile_odo()
 {
     uint32_t value ;
 #if !ON_PC_CACLE
-    if (get_mile_param(MILE_PARAM_ODO, &value) )
+    if (get_hcn_mile_param(HCN_MILE_PARAM_ODO, &value) )
         return value ;
 #endif
-    return 0 ;
+    return odo_value ;
 
 }
 
-void vehicle_set_mile_odo(double value)
+void vehicle_set_mile_odo(double value) 
 {
     uint32_t __value = (uint32_t)value ;
 #if !ON_PC_CACLE
-    if(!set_mile_param(MILE_PARAM_ODO, &__value))
-        LV_LOG_ERROR("Save odo data error!\r\n");
+    set_hcn_mile_param(HCN_MILE_PARAM_ODO, &__value) ;
 #endif
 
+    odo_value = value ;
     return ;
 }
 
@@ -43,48 +47,73 @@ uint32_t vehicle_get_mile_tripA()
 {
     uint32_t value ;
 #if !ON_PC_CACLE
-    if (get_mile_param(MILE_PARAM_TRIP, &value) )
+    if (get_hcn_mile_param(HCN_MILE_PARAM_TRIP_A, &value) )
         return value ;
 #endif
-    return 0 ;
+    return tripA ;
 
 }
 
-void vehicle_set_mile_tripA(double value)
+void vehicle_set_mile_tripA(double value) 
 {
     uint32_t __value = (uint32_t)value ;
 #if !ON_PC_CACLE
-    if(!set_mile_param(MILE_PARAM_TRIP, &__value) )
-        LV_LOG_ERROR("Save tripA data error!\r\n");
+    set_hcn_mile_param(HCN_MILE_PARAM_TRIP_A, &__value) ;
 #endif
-
+    tripA = value ;
     return ;
 }
 
+void vehicle_save_mile_tripA(void) 
+{
+    uint32_t trip_data = 0;
+#if !ON_PC_CACLE
+    if (get_hcn_mile_param(HCN_MILE_PARAM_TRIP_A, &trip_data)) {
+        if (send_mcu_set_trip_a(trip_data) != 0) {
+            hcn_log_error("Save trip a data error!\r\n");
+        }
+    } else {
+        hcn_log_error("Get trip a param error!\r\n");
+    }
+#endif
+}
 
 //tripB
 uint32_t vehicle_get_mile_tripB()
 {
     uint32_t value ;
 #if !ON_PC_CACLE
-    if (get_mile_param(MILE_PARAM_TRIP, &value) )
+    if (get_hcn_mile_param(HCN_MILE_PARAM_TRIP_B, &value) )
         return value ;
 #endif
-    return 0 ;
+    return tripB ;
 
 }
 
-void vehicle_set_mile_tripB(double value)
+void vehicle_set_mile_tripB(double value) 
 {
     uint32_t __value = (uint32_t)value ;
 #if !ON_PC_CACLE
-    set_mile_param(MILE_PARAM_TRIP, &__value) ;
+    set_hcn_mile_param(HCN_MILE_PARAM_TRIP_B, &__value) ;
 #endif
-
+    tripB = value ;
     return ;
 }
 
 
+void vehicle_save_odo_mileage(void) 
+{
+    uint32_t odo_data = 0;
+#if !ON_PC_CACLE
+    if (get_hcn_mile_param(HCN_MILE_PARAM_ODO, &odo_data)) {
+        if (send_mcu_set_odo(odo_data) != 0) {
+            hcn_log_error("Save odo data error!\r\n");
+        }
+    } else {
+        hcn_log_error("Get odo param error!\r\n");
+    }
+#endif
+} 
 
 int32_t vehicle_get_mile_changed()
 {
@@ -93,80 +122,8 @@ int32_t vehicle_get_mile_changed()
     state = vehicle_get_data(VEH_MILEAGE_CHANGE_MSG);
     if (state)
         vehicle_set_data(VEH_MILEAGE_CHANGE_MSG , 0);
-
+    
     return state;
 #endif
     return  0 ;
-}
-
-/* ---- 续航里程 (RemainMile): 参考里程数组存于 usr_param 的 ref_mile_arr ---- */
-
-///< 数组长度宏必须与中间层一致 (不一致时编译报错, 避免两处定义漂移)
-typedef char vehicle_ref_mile_len_check[
-    (REF_MILE_ARR_NUM == VEHICLE_REF_MILE_ARR_LEN) ? 1 : -1];
-
-bool vehicle_get_ref_mile_arr(uint8_t pack, uint8_t *arr)
-{
-#if !ON_PC_CACLE
-    if (pack < 1 || pack > REF_MILE_PACK_NUM || !arr)
-        return false ;
-
-    return get_usr_param((usr_param_handle_e)(USR_PARAM_REF_MILE_ARR_P1 + pack - 1),
-                         arr) ;
-#endif
-
-    return false ;
-}
-
-bool vehicle_set_ref_mile_arr(uint8_t pack, const uint8_t *arr)
-{
-#if !ON_PC_CACLE
-    if (pack < 1 || pack > REF_MILE_PACK_NUM || !arr)
-        return false ;
-
-    return set_usr_param((usr_param_handle_e)(USR_PARAM_REF_MILE_ARR_P1 + pack - 1),
-                         (void *)arr) ;
-#endif
-
-    return false ;
-}
-
-void vehicle_set_mile_endurance(uint16_t km)
-{
-#if !ON_PC_CACLE
-    vehicle_set_data(VEH_MILEAGE_ENDURANCE_A, (int32_t)km) ;
-#endif
-
-    return ;
-}
-
-void vehicle_set_mile_range(uint16_t km)
-{
-#if !ON_PC_CACLE
-    if(!set_mile_param(MILE_PARAM_RANGE, &km))
-        LV_LOG_ERROR("Save range data error!\r\n");
-#endif
-
-    return ;
-}
-
-bool vehicle_get_mile_range(uint16_t *km)
-{
-#if !ON_PC_CACLE
-    if (!km)
-        return false ;
-
-    return get_mile_param(MILE_PARAM_RANGE, km) ;
-#endif
-
-    return false ;
-}
-
-void vehicle_set_ref_mile_count(uint16_t centikm)
-{
-#if !ON_PC_CACLE
-    vehicle_set_data(VEH_REF_MILE_COUNT_MILE, (int32_t)centikm) ;
-#endif
-
-    return ;
 }

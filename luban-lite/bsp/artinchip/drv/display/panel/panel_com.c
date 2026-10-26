@@ -181,35 +181,6 @@ void panel_de_timing_disable(struct aic_panel *panel, u32 ms)
         aic_delay_ms(ms);
 }
 
-void panel_display_enable(void) 
-{
-    unsigned int g, p;
-    long lcd_sleep, rst_pin, stbyb_pin;
-
-    lcd_sleep = hal_gpio_name2pin("PD.17");
-
-    g = GPIO_GROUP(lcd_sleep);
-    p = GPIO_GROUP_PIN(lcd_sleep);
-
-    hal_gpio_direction_output(g, p);
-    hal_gpio_set_output(g, p);
-
-    rst_pin = hal_gpio_name2pin("PD.16");
-
-    g = GPIO_GROUP(rst_pin);
-    p = GPIO_GROUP_PIN(rst_pin);
-
-    hal_gpio_direction_output(g, p);
-    hal_gpio_set_output(g, p);
-    aic_delay_ms(10);
-    stbyb_pin = hal_gpio_name2pin("PD.15");
-    g = GPIO_GROUP(stbyb_pin);
-    p = GPIO_GROUP_PIN(stbyb_pin);
-
-    hal_gpio_direction_output(g, p);
-    hal_gpio_set_output(g, p);
-}
-
 void panel_backlight_enable(struct aic_panel *panel, u32 ms)
 {
 #ifdef AIC_PM_INDEPENDENT_POWER_KEY
@@ -292,8 +263,6 @@ int panel_default_enable(struct aic_panel *panel)
 {
     panel_di_enable(panel, 0);
     panel_de_timing_enable(panel, 60);
-    panel_display_enable();
-    aic_delay_ms(50);
     panel_backlight_enable(panel, 0);
     return 0;
 }

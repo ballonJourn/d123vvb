@@ -1,109 +1,123 @@
 #include "display.h"
-#include "setting_menu.h"
-#include "template.h"
+#include <stdio.h>
 #include "vehicle_argument.h"
-#include "ui_theme.h"
-#include "set_page_key.h"
-#include "brightness.h"
+#include "setting_menu.h"
+#include "definition.h"
 
-/* ===== 静态状态 ===== */
-static int focus_slot = 0;   /* 0=Daytime, 1=Night, 2=Auto */
+static lv_obj_t* set_display_widget[DIAPLAY_OPTION_MAX] = { NULL };
 
-#define DISPLAY_ITEM_NUM  3
+static display_option_e option = DIAPLAY_AUTO_OPTION ;
 
-/* slot → 主题枚举（值与 logic.c/ui_theme.c 约定一致） */
-static const display_option_e slot_to_option[DISPLAY_ITEM_NUM] = {
-    DIAPLAY_DAY_OPTION,    /* slot 0: Daytime */
-    DIAPLAY_NIGHT_OPTION,  /* slot 1: Night   */
-    DIAPLAY_AUTO_OPTION,   /* slot 2: Auto    */
-};
-/* slot → 持久化 param 值 */
-static const uint8_t slot_to_param[DISPLAY_ITEM_NUM] = {
-    VEHICLE_DISPLAY_MODE_DAY,
-    VEHICLE_DISPLAY_MODE_NIGHT,
-    VEHICLE_DISPLAY_MODE_AUTO,
-};
-
-/* 项显示名——走翻译表 */
-static const key_id_t item_key[DISPLAY_ITEM_NUM] = {
-    daytime,
-    night,
-    auto_TXT,
-};
-
-/* 刷新：各槽位选中态 + 项文字（模板控件） */
-static void display_refresh(void)
+static void setting_menu_view_deal_set()
 {
-    for (int s = 0; s < DISPLAY_ITEM_NUM; s++) {
-        tpl3_set_slot(s, aic_get_translation(item_key[s]), true);
-        tpl3_set_card_pressed(s, s == focus_slot);
-    }
+    printf("display setting_menu_view_deal_set = %d\n" , option) ;
+    // 设置主题参数 0：白天 1:黑夜 2:自动
+    if (option == DIAPLAY_AUTO_OPTION)
+        vehicle_set_param_display(2);
+    else if(option == DIAPLAY_DAY_OPTION)
+        vehicle_set_param_display(0);
+    else if (option == DIAPLAY_NIGHT_OPTION)
+        vehicle_set_param_display(1);
+    
+    // global_refresh_display(option);
+
+    return  ;
 }
 
-void display_init(void)
+static void setting_menu_view_deal_back()
 {
-    set_current_menu_level(MENU_LEVEL_4);
+    set_current_menu_level(MENU_LEVEL_1);
+    display_view_clean_state() ;
 
-    tpl3_activate(aic_get_translation(scene_title), NULL);
-    tpl3_set_label_mode(false, true);   /* 左对齐 + arrow */
-
-    /* 取已存主题 param（0=白天,1=黑夜,2=自动），值与槽位序号对齐 */
-    uint8_t value = vehicle_get_param_display();
-    focus_slot = (value < DISPLAY_ITEM_NUM) ? (int)value : 0;
-    display_refresh();
+    return  ;
 }
 
-/* 语言切换刷新：保留焦点位置 */
-void display_relang(void)
+static void setting_menu_view_deal_up()
 {
-    tpl3_activate(aic_get_translation(scene_title), NULL);
-    tpl3_set_label_mode(false, true);
-    display_refresh();
+    option =  (option - 1 + DIAPLAY_OPTION_MAX) % DIAPLAY_OPTION_MAX ;
+    display_view_set_focused_item(option) ;
+
+    return  ;
 }
 
-void display_destroy(void)
+static void setting_menu_view_deal_down()
 {
-    focus_slot = 0;
+    option =  (option + 1 ) % DIAPLAY_OPTION_MAX ;
+    display_view_set_focused_item(option) ;
+
+    return  ;
 }
 
-/* ===== 按键处理（3项环形，表驱动） ===== */
-static void display_deal_up(void)
-{
-    focus_slot = (focus_slot - 1 + DISPLAY_ITEM_NUM) % DISPLAY_ITEM_NUM;
-    display_refresh();
-}
-
-static void display_deal_down(void)
-{
-    focus_slot = (focus_slot + 1) % DISPLAY_ITEM_NUM;
-    display_refresh();
-}
-
-static void display_deal_set(void)
-{
-    /* 持久化 param + 即时主题刷新（枚举值与 logic.c/ui_theme.c 约定一致） */
-    vehicle_set_param_display(slot_to_param[focus_slot]);
-    global_refresh_display((int)slot_to_option[focus_slot]);
-}
-
-static void display_deal_back(void)
-{
-    set_active_l4_handler(NULL);
-    set_active_l4_lang_refresh(NULL);
-    tpl3_hide();
-    display_destroy();
-    brightness_init();   /* 回 L3，重配 tpl3 为 brightness */
-}
 
 static short_click_deal short_click[] = {
-    [CLICK_SHORT_UP]   = display_deal_up,
-    [CLICK_SHORT_DOWN] = display_deal_down,
-    [CLICK_SHORT_SET]  = display_deal_set,
-    [CLICK_SHORT_BACK] = display_deal_back,
+    [CLICK_SHORT_UP]   = setting_menu_view_deal_up  ,
+    [CLICK_SHORT_DOWN] = setting_menu_view_deal_down,
+    [CLICK_SHORT_SET]  = setting_menu_view_deal_set ,
+    [CLICK_SHORT_BACK] = setting_menu_view_deal_back,
 };
+
+
+void display_init()
+{
+
+    setting_page_t *page = setting_page_get(&ui_manager);
+    VIEW_MEMBER_VALID(page, display_option_1) ;
+    VIEW_MEMBER_VALID(page, display_option_2) ;
+    VIEW_MEMBER_VALID(page, display_option_3) ;
+    set_display_widget[DIAPLAY_AUTO_OPTION] = display_option_1 ;
+    set_display_widget[DIAPLAY_DAY_OPTION]  = display_option_2;
+    set_display_widget[DIAPLAY_NIGHT_OPTION] = display_option_3;
+
+    uint8_t value = vehicle_get_param_display();
+    if (value == 0)
+        option = DIAPLAY_DAY_OPTION ;
+    else if(value == 1)
+        option = DIAPLAY_NIGHT_OPTION ;
+    else if (value == 2)
+        option = DIAPLAY_AUTO_OPTION ;
+    else
+        option = DIAPLAY_AUTO_OPTION ;
+
+    display_view_set_focused_item(option) ;
+    //刷新数据 todo
+
+    return  ;
+}
 
 void on_display_deal_short_key(click_e key)
 {
-    if (key < sizeof(short_click) / sizeof(short_click_deal) && short_click[key])
+    printf("on_bt_conn_deal_short_key = %d \n" ,key) ;
+    if (key < sizeof(short_click) / sizeof(short_click_deal) 
+        && short_click[key]) {
         short_click[key]();
+    }
+
+    return  ;
+}
+
+void display_view_set_focused_item(display_option_e focusedIndex)
+{
+    for (size_t i = 0; i < DIAPLAY_OPTION_MAX ; i++){
+        if (set_display_widget[i]){
+            if (i == focusedIndex)
+                lv_obj_set_style_bg_image_src(set_display_widget[i] , LVGL_IMAGE_PATH(setting/setting_selected.png), 0) ;
+            else
+                lv_obj_remove_local_style_prop(set_display_widget[i] , LV_STYLE_BG_IMAGE_SRC , 0);
+        }
+
+    }
+
+    option = focusedIndex ;
+    
+    return ;
+}
+
+void display_view_clean_state()
+{
+    for (size_t i = 0; i < DIAPLAY_OPTION_MAX ; i++){
+        if (set_display_widget[i])
+            lv_obj_remove_local_style_prop(set_display_widget[i] , LV_STYLE_BG_IMAGE_SRC , 0);
+    }
+
+    return ;
 }

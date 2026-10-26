@@ -2,6 +2,8 @@
 #include "key_common.h"
 #include "dev_config.h"
 
+#if MW_ADC_KEY_ENABLE
+
 static key_event_cb_t key_event_cb = NULL;
 
 int set_key_event_cb(key_event_cb_t event_cb) {
@@ -20,3 +22,5 @@ void send_key_event(uint8_t key_event) {
         key_event_cb(key_event);
     }
 }
+
+#endif

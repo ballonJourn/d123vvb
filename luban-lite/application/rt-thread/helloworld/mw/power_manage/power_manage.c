@@ -6,7 +6,6 @@
 
 #if POWER_MANAGE_ENABLE
 
-#if POWER_LOW_SLEEP_ENABLE
 struct rt_event usr_pm_event;
 static void pm_thread(void *parameter) {
     rt_uint32_t event;
@@ -34,7 +33,6 @@ static void pm_thread(void *parameter) {
         } 
     }
 }
-#endif
 
 int power_manage_init(void) {
     rt_err_t ret;
@@ -45,7 +43,6 @@ int power_manage_init(void) {
         return -1;
     }
 
-#if POWER_LOW_SLEEP_ENABLE
     ret = rt_event_init(&usr_pm_event, "usr_pm_event", RT_IPC_FLAG_PRIO);
     if (ret != RT_EOK) {
         rt_log_error("Failed to initialize power manage event!\n");
@@ -60,7 +57,6 @@ int power_manage_init(void) {
         rt_log_error("Failed to create power manage thread!\n");
         return -1;
     }
-#endif
 
     return 0;
 }

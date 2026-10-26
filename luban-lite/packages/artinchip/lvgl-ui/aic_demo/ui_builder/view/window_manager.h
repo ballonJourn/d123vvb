@@ -9,9 +9,6 @@ typedef enum {
     WINDOW_MENU,
     WINDOW_MOBILE,
     WINDOW_DEVICE,
-    WINDOW_DVR,    /* 预留：AWTK dvr_page */
-    WINDOW_CP,     /* 预留：AWTK cp_page (CarPlay) */
-    WINDOW_LINK,   /* 预留：AWTK link_page (手机互联) */
     WINDOW_NULL,
 } window_e;
 

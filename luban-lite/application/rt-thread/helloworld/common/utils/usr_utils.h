@@ -102,9 +102,9 @@ void set_build_date_time(void);
  */
 int is_valid_date(int year, int mon, int day);
 
-void soc_version_init(void);
-
-const char *get_soc_version(void);
+#if 0
+int parse_mcu_ver_format_by_strtok(const char *ver, parse_info_t *info);
+#endif
 
 #ifdef __cplusplus
 }

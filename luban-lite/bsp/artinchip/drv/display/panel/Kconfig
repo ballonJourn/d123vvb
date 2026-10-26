@@ -211,11 +211,7 @@ choice
 
     config AIC_PANEL_800X480_RESOLUTION
         bool "800x480"
-        depends on AIC_DISP_RGB || AIC_DISP_LVDS
-
-    # config AIC_PANEL_800X480_RESOLUTION
-    #     bool "800x480"
-    #     depends on AIC_DISP_LVDS 
+        depends on AIC_DISP_RGB
 
     config AIC_PANEL_1024X600_RESOLUTION
         bool "1024x600"
@@ -238,7 +234,6 @@ config LVDS_PANEL_MATCH_ID
     default 0 if AIC_PANEL_1024X600_RESOLUTION
     default 1 if AIC_PANEL_1920X1080_RESOLUTION
     default 2 if AIC_PANEL_CUSTOM_RESOLUTION
-    default 3 if AIC_PANEL_800X480_RESOLUTION
 
 choice
     prompt "ILI9881C Match Table"

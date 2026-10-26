@@ -1,101 +1,121 @@
 #include "brightness.h"
+#include <stdio.h>
+#include "vehicle_argument.h"
 #include "setting_menu.h"
-#include "template.h"
-#include "set_page_key.h"
-#include "display.h"
-#include "brightness_bar.h"
-#include "instrument.h"
+#include "definition.h"
 
-/* ===== 静态状态 ===== */
-static brightness_l3_item_e focus_slot = BRIGHTNESS_L3_SCENE;
+static int  option = 0 ;
+static int  count  = 0 ;
 
-/* 项显示名——走翻译表 */
-static const key_id_t item_key[BRIGHTNESS_L3_ITEM_NUM] = {
-    scene,
-    brightness,
-};
-
-brightness_l3_item_e get_l3_brightness_focus(void) { return focus_slot; }
-
-/* 刷新：各槽位选中态 + 项文字（模板控件） */
-static void brightness_refresh(void)
+static void setting_menu_view_deal_set()
 {
-    for (int s = 0; s < BRIGHTNESS_L3_ITEM_NUM; s++) {
-        tpl3_set_slot(s, aic_get_translation(item_key[s]), true);
-        tpl3_set_card_pressed(s, s == (int)focus_slot);
-    }
-    tpl3_set_slot(2, NULL, false);   /* 隐藏第3槽 */
+    printf("brightness setting_menu_view_deal_set \n") ;
+    vehicle_set_param_brightness(option);
+    return  ;
 }
 
-void brightness_init(void)
+static void setting_menu_view_deal_back()
 {
-    setting_page_t *page = setting_page_get(&ui_manager);
-    set_current_menu_level(MENU_LEVEL_3);
+    set_current_menu_level(MENU_LEVEL_1);
+    brightness_view_clean_state()  ;
 
-    tpl3_activate(aic_get_translation(brightness_settings_title), NULL);
-    tpl3_set_label_mode(false, true);   /* 左对齐 + arrow */
-
-    /* 焦点不复位：本入口与"从 L4(scene / brightness bar) 返回"共用，
-     * 复位留给 brightness_destroy()（本页退出到 L2 时调用） */
-    brightness_refresh();
+    return  ;
 }
 
-/* 语言切换刷新：保留焦点位置 */
-void brightness_relang(void)
+static void setting_menu_view_deal_up()
 {
-    tpl3_activate(aic_get_translation(brightness_settings_title), NULL);
-    tpl3_set_label_mode(false, true);
-    brightness_refresh();
+    if (0 == count)
+        return ;
+    
+    option =  (option - 1 + count) % count ;
+    brightness_view_set_focused_item(option) ;
+
+    return  ;
 }
 
-void brightness_destroy(void)
+static void setting_menu_view_deal_down()
 {
-    focus_slot = BRIGHTNESS_L3_SCENE;
+    if (0 == count)
+        return ;
+
+    option =  (option + 1 ) % count ;
+    brightness_view_set_focused_item(option) ;
+
+    return  ;
 }
 
-/* ===== 按键处理（2项环形，表驱动） ===== */
-static void brightness_deal_up(void)
-{
-    focus_slot = (brightness_l3_item_e)((focus_slot - 1 + BRIGHTNESS_L3_ITEM_NUM) % BRIGHTNESS_L3_ITEM_NUM);
-    brightness_refresh();
-}
-
-static void brightness_deal_down(void)
-{
-    focus_slot = (brightness_l3_item_e)((focus_slot + 1) % BRIGHTNESS_L3_ITEM_NUM);
-    brightness_refresh();
-}
-
-static void brightness_deal_set(void)
-{
-    /* 按 focus 分派 L4，并注册 L4 按键处理器与语言刷新处理器 */
-    if (focus_slot == BRIGHTNESS_L3_SCENE) {
-        set_active_l4_handler(on_display_deal_short_key);
-        set_active_l4_lang_refresh(display_relang);
-        display_init();
-    } else {
-        set_active_l4_handler(on_brightness_bar_deal_short_key);
-        set_active_l4_lang_refresh(brightness_bar_relang);
-        brightness_bar_init();
-    }
-}
-
-static void brightness_deal_back(void)
-{
-    tpl3_hide();
-    brightness_destroy();
-    instrument_init();   /* 回 L2，重配 tpl3 为 instrument */
-}
 
 static short_click_deal short_click[] = {
-    [CLICK_SHORT_UP]   = brightness_deal_up,
-    [CLICK_SHORT_DOWN] = brightness_deal_down,
-    [CLICK_SHORT_SET]  = brightness_deal_set,
-    [CLICK_SHORT_BACK] = brightness_deal_back,
+    [CLICK_SHORT_UP]   = setting_menu_view_deal_up  ,
+    [CLICK_SHORT_DOWN] = setting_menu_view_deal_down,
+    [CLICK_SHORT_SET]  = setting_menu_view_deal_set ,
+    [CLICK_SHORT_BACK] = setting_menu_view_deal_back,
 };
+
+
+void brightness_init()
+{
+    uint8_t value = vehicle_get_param_brightness() ;
+    option = value ;
+    brightness_view_set_focused_item(option) ;
+    
+    //刷新数据 todo
+    return  ;
+}
+
 
 void on_brightness_deal_short_key(click_e key)
 {
-    if (key < sizeof(short_click) / sizeof(short_click_deal) && short_click[key])
+    printf("on_bt_conn_deal_short_key = %d \n" ,key) ;
+    if (key < sizeof(short_click) / sizeof(short_click_deal) 
+        && short_click[key]) {
         short_click[key]();
+    }
+
+    return  ;
+}
+
+int prevIndex = 0 ;
+int endIndex  = 2 ;
+
+void brightness_view_set_focused_item(int focusedIndex)
+{
+    setting_page_t *page = setting_page_get(&ui_manager);
+    VIEW_MEMBER_VALID(page, brightness_list) ;
+    count = lv_obj_get_child_count(brightness_list);
+
+    if (0 == count || focusedIndex > count) 
+        return ;
+
+    lv_obj_t *children = NULL ;
+
+    for (size_t i = 0; i < count ; i++)
+    {
+        children = lv_obj_get_child(brightness_list , i) ;
+
+        if (i == focusedIndex)
+            lv_obj_set_style_bg_image_src(children, LVGL_IMAGE_PATH(setting/setting_selected.png), 0) ;
+        else
+            lv_obj_remove_local_style_prop(children , LV_STYLE_BG_IMAGE_SRC , 0);
+
+    }
+
+    lv_obj_scroll_to_view(lv_obj_get_child(brightness_list , focusedIndex) ,LV_ANIM_OFF);
+    option = focusedIndex ;
+
+    return ;
+}
+
+void brightness_view_clean_state()
+{
+    setting_page_t *page = setting_page_get(&ui_manager);
+    VIEW_MEMBER_VALID(page, brightness_list) ;
+    for (size_t i = 0; i < count ; i++){
+        lv_obj_t* children = lv_obj_get_child(brightness_list , i) ;
+        if (children)
+            lv_obj_remove_local_style_prop(children , LV_STYLE_BG_IMAGE_SRC , 0);
+        
+    }
+
+    return ;
 }

@@ -10,125 +10,57 @@
 
 static lang_type_t current_lang = AIC_LANG_EN;
 
-const aic_language_t languages[AIC_LANG_NUM] = {
-    [AIC_LANG_CH] = {"ch", DEFAULT_TTF, true},
-    [AIC_LANG_EN] = {"en", DEFAULT_TTF, true},
-    [AIC_LANG_KO] = {"ko", DEFAULT_TTF, true},   /* 谚文已并入 c_default_*，无独立字体 id */
-    [AIC_LANG_SG] = {"sg", DEFAULT_TTF, true},   /* 文案同英文列 */
-    [AIC_LANG_TH] = {"th", THAI_TTF,   true},    /* 泰文独立字体，隔离 +3px 行高 */
+const aic_language_t languages[] = {
+    {"ch", DEFAULT_TTF, true},
+    {"en", DEFAULT_TTF, true}
 };
 
 const char *font_names[] = {
     "default.ttf",
-    "speedLabel.ttf",
-    "thai.ttf"
+    "speedLabel.ttf"
 };
 
-/* 列序：CH / EN / KO / SG / TH（SG 列文案与 EN 列相同）。
- * 用指定初始化器，key 与行号解耦，插入新 key 不会错行。 */
-const char *translations[KEY_ID_NUM][AIC_LANG_NUM] = {
-    [SAMPLE]              = {"示例",       "exmple",      "샘플",           "exmple",      "ตัวอย่าง"},
-    [Time]                = {"时间",       "Time",        "시간",           "Time",        "เวลา"},
-    [auto_TXT]            = {"自动",       "Auto",        "자동",           "Auto",        "อัตโนมัติ"},
-    [bluetooth]           = {"蓝牙",       "Bluetooth",   "블루투스",        "Bluetooth",   "บลูทูธ"},
-    [board_version]       = {"版本号",     "Version",     "버전",           "Version",     "เวอร์ชัน"},
-    [brightness]          = {"亮度",       "Brightness",  "밝기",           "Brightness",  "ความสว่าง"},
-    [brightness_num]      = {"1",          "1",           "1",              "1",           "1"},
-    [bt_close]            = {"关",         "Close",       "끄기",           "Close",       "ปิด"},
-    [bt_open]             = {"开",         "Open",        "켜기",           "Open",        "เปิด"},
-    [chinese]             = {"中文",       "中文",         "中文",           "中文",         "中文"},
-    [colon]               = {":",          ":",           ":",              ":",           ":"},
-    [connect]             = {"连接手机",   "Connect",     "휴대폰 연결",     "Connect",     "เชื่อมต่อมือถือ"},
-    [device]              = {"设备信息",   "Device",      "기기 정보",       "Device",      "ข้อมูลอุปกรณ์"},
-    [display]             = {"显示设置",   "Display",     "화면 설정",       "Display",     "ตั้งค่าจอ"},
-    [english]             = {"English",    "English",     "English",        "English",     "English"},
-    [hour]                = {"05",         "05",          "05",             "05",          "05"},
-    [km]                  = {"km",         "km",          "km",             "km",          "km"},
-    [language]            = {"语言",       "Language",    "언어",           "Language",    "ภาษา"},
-    [mile]                = {"mile",       "mile",        "mile",           "mile",        "mile"},
-    [num]                 = {"999999",     "999999",      "999999",         "999999",      "999999"},
-    [num999]              = {"999.9",      "999.9",       "999.9",          "999.9",       "999.9"},
-    [odo]                 = {"ODO",        "ODO",         "ODO",            "ODO",         "ODO"},
-    [qr_tips]             = {"扫码连接",   "Scan QR",     "QR 스캔",         "Scan QR",     "สแกน QR"},
-    [sn]                  = {"序列号",     "SN",          "시리얼 번호",     "SN",          "หมายเลขเครื่อง"},
-    [speed]               = {"199",        "199",         "199",            "199",         "199"},
-    [tmps]                = {"胎压检测",   "Tmps",        "타이어 공기압",   "Tmps",        "แรงดันลมยาง"},
-    [trip]                = {"TRIP",       "TRIP",        "TRIP",           "TRIP",        "TRIP"},
-    [unit]                = {"单位",       "Unit",        "단위",           "Unit",        "หน่วย"},
-    [unit_km]             = {"公里",       "Kilometer",   "킬로미터",        "Kilometer",   "กิโลเมตร"},
-    [unit_mile]           = {"英里",       "Mile",        "마일",           "Mile",        "ไมล์"},
-    ///< CAN 弹窗提示 (pop_tip) 文案
-    [pop_seat_unlock]     = {"座椅已解锁", "Seat Unlocked",  "시트 잠금 해제됨",  "Seat Unlocked", "ปลดล็อกเบาะแล้ว"},
-    [pop_batt_low]        = {"电量低",     "Battery Low",    "배터리 부족",       "Battery Low",   "แบตเตอรี่ต่ำ"},
-    [pop_cruise_fault]    = {"巡航故障",   "Cruise Fault",   "크루즈 고장",       "Cruise Fault",  "ครูซผิดปกติ"},
-    [pop_nfc_learning]    = {"NFC 卡片学习与删除","NFC CARD LEARNING AND DELETION","NFC 카드 학습 및 삭제","NFC CARD LEARNING AND DELETION","การเรียนรู้และลบการ์ด NFC"},
-    [pop_nfc_success]     = {"读取成功",   "Read successfully", "읽기 성공",         "Read successfully", "อ่านสำเร็จ"},
-    [pop_nfc_failure]     = {"读取失败",   "Read failure",   "읽기 실패",           "Read failure",  "อ่านล้มเหลว"},
-    [pop_tpms_init]       = {"胎压匹配中", "TPMS Matching",  "TPMS 매칭 중",      "TPMS Matching", "กำลังจับคู่ TPMS"},
-    [pop_tpms_success]       = {"胎压学习成功", "TPMS matching succeeded",  "TPMS 매칭 중",      "TPMS matching succeeded", "กำลังจับคู่ TPMS"},
-    [pop_tpms_failed]       = {"胎压学习失败", "TPMS matching failed",  "TPMS 매칭 중",      "TPMS matching failed", "กำลังจับคู่ TPMS"},
-    [pop_upgrade]         = {"升级中",     "Upgrading",      "업데이트 중",       "Upgrading",     "กำลังอัปเดต"},
-    [pop_upgrade_failed]  = {"升级失败",   "Upgrade Failed", "업데이트 실패",     "Upgrade Failed","อัปเดตล้มเหลว"},
-    [pop_upgrade_success] = {"升级成功",   "Upgrade Success","업데이트 성공",     "Upgrade Success","อัปเดตสำเร็จ"},
-
-    /* ===== 设置菜单 L1 卡片 + L1 顶部标题 ===== */
-    [set_up]              = {"设置",       "SET UP",      "설정",           "SET UP",      "ตั้งค่า"},
-    [cruise_control]      = {"定速巡航",   "Cruise Control", "크루즈 컨트롤",  "Cruise Control", "ครูซคอนโทรล"},
-    [unlock_seat]         = {"座椅解锁",   "Unlock the seat", "시트 잠금 해제", "Unlock the seat", "ปลดล็อกเบาะ"},
-    [reset_trip]          = {"里程清零",   "Reset trip mileage", "트립 거리 초기화", "Reset trip mileage", "รีเซ็ตระยะทาง"},
-    [power_down]          = {"整车下电",   "Power down the entire vehicle", "차량 전원 차단", "Power down the entire vehicle", "ตัดไฟทั้งคัน"},
-    [instrument_settings] = {"仪表设置",   "Instrument Settings", "계기판 설정", "Instrument Settings", "ตั้งค่าเรือนไมล์"},
-    [meter_view]          = {"仪表视图",   "Meter view",  "계기판 보기",     "Meter view",  "มุมมองมาตรวัด"},
-
-    /* ===== L2/L3/L4 标题 ===== */
-    [instrument_settings_title] = {"仪表设置", "INSTRUMENT SETTINGS", "계기판 설정", "INSTRUMENT SETTINGS", "ตั้งค่าเรือนไมล์"},
-    [brightness_settings_title] = {"亮度设置", "BRIGHTNESS SETTINGS", "밝기 설정",   "BRIGHTNESS SETTINGS", "ตั้งค่าความสว่าง"},
-    [brightness_title]          = {"亮度",     "BRIGHTNESS",          "밝기",       "BRIGHTNESS",          "ความสว่าง"},
-    [scene_title]               = {"场景",     "SCENE",               "화면 모드",   "SCENE",               "โหมดจอ"},
-    [unit_settings_title]       = {"单位设置", "UNIT SETTINGS",       "단위 설정",   "UNIT SETTINGS",       "ตั้งค่าหน่วย"},
-    [restore_factory_title]     = {"恢复出厂设置", "RESTORE FACTORY SETTINGS", "공장 초기화", "RESTORE FACTORY SETTINGS", "รีเซ็ตค่าโรงงาน"},
-
-    /* ===== L2/L3/L4 选项 ===== */
-    [language_settings]   = {"语言设置",   "Language settings", "언어 설정",   "Language settings", "ตั้งค่าภาษา"},
-    [brightness_settings] = {"亮度设置",   "Brightness settings", "밝기 설정", "Brightness settings", "ตั้งค่าความสว่าง"},
-    [time_format]         = {"时间格式切换", "Time format switching", "시간 형식 전환", "Time format switching", "สลับรูปแบบเวลา"},
-    [unit_switch]         = {"公英制切换", "Switch between Imperial and Metric systems", "단위계 전환", "Switch between Imperial and Metric systems", "สลับหน่วยวัด"},
-    [restore_factory]     = {"恢复出厂设置", "Restore factory settings", "공장 초기화", "Restore factory settings", "รีเซ็ตค่าโรงงาน"},
-    [tire_pressure]       = {"胎压检测",   "Check Tire Pressure", "타이어 공기압 확인", "Check Tire Pressure", "ตรวจแรงดันลมยาง"},
-    [view_faults]         = {"查看故障",   "View Faults",  "고장 정보 보기",  "View Faults",  "ดูข้อขัดข้อง"},
-    [sw_version]          = {"查看软件版本", "View Software Version", "소프트웨어 버전 보기", "View Software Version", "ดูเวอร์ชันซอฟต์แวร์"},
-    [scene]               = {"场景",       "Scene",        "화면 모드",       "Scene",        "โหมดจอ"},
-    [daytime]             = {"白天",       "Daytime",      "주간",           "Daytime",      "กลางวัน"},
-    [night]               = {"黑夜",       "Night",        "야간",           "Night",        "กลางคืน"},
-    [reset_after_power_off] = {"下电清零", "Reset after power off", "전원 차단 후 초기화", "Reset after power off", "รีเซ็ตหลังปิดเครื่อง"},
-    [reset_by_button]       = {"按键清零", "Reset by button",       "버튼으로 초기화",     "Reset by button",       "รีเซ็ตด้วยปุ่ม"},
-
-    /* ===== 语言列表自名（5 列同值） ===== */
-    [lang_name_english]     = {"English",     "English",     "English",     "English",     "English"},
-    [lang_name_chinese]     = {"中文",         "中文",         "中文",         "中文",         "中文"},
-    [lang_name_korean]      = {"한국어",       "한국어",       "한국어",       "한국어",       "한국어"},
-    [lang_name_singaporean] = {"Singaporean", "Singaporean", "Singaporean", "Singaporean", "Singaporean"},
-    [lang_name_thai]        = {"ภาษาไทย",     "ภาษาไทย",     "ภาษาไทย",     "ภาษาไทย",     "ภาษาไทย"},
+const char *translations[30][2] = {
+    {"示例", "exmple"},
+    {"时间", "Time"},
+    {"自动", "Auto"},
+    {"蓝牙", "Bluetooth"},
+    {"版本号", "Version"},
+    {"亮度", "Brightness"},
+    {"1", "1"},
+    {"关", "Close"},
+    {"开", "Open"},
+    {"中文", "中文"},
+    {":", ":"},
+    {"连接手机", "Connect"},
+    {"设备信息", "Device"},
+    {"显示设置", "Display"},
+    {"English", "English"},
+    {"05", "05"},
+    {"km", "km"},
+    {"语言", "Language"},
+    {"mile", "mile"},
+    {"999999", "999999"},
+    {"999.9", "999.9"},
+    {"ODO", "ODO"},
+    {"扫码连接", "Scan QR"},
+    {"序列号", "SN"},
+    {"199", "199"},
+    {"胎压检测", "Tmps"},
+    {"TRIP", "TRIP"},
+    {"单位", "Unit"},
+    {"公里", "Kilometer"},
+    {"英里", "Mile"}
 };
 
 void aic_set_language(lang_type_t lang)
 {
-    if ((int)lang < 0 || (int)lang >= AIC_LANG_NUM) {
-        LV_LOG_WARN("invalid lang %d, keep %d", (int)lang, (int)current_lang);
-        return;
-    }
-    current_lang = lang;
+    current_lang  = lang;
 }
 
-/* 越界/空列一律返回空串，调用方无需判空（lv_label_set_text(NULL) 会崩） */
 const char *aic_get_translation(key_id_t key)
 {
-    if ((int)key < 0 || (int)key >= KEY_ID_NUM)
-        return "";
-    if ((int)current_lang < 0 || (int)current_lang >= AIC_LANG_NUM)
-        return "";
-    const char *s = translations[key][current_lang];
-    return s ? s : "";
+    return translations[key][current_lang];
 }
 
 const lv_font_t *aic_init_lang_font(int font_id, int font_size)
@@ -167,23 +99,8 @@ const lv_font_t *aic_get_multi_lang_font(int font_size)
 const lv_font_t *aic_get_c_font(int font_id, int font_size)
 {
     switch (font_id) {
-        case THAI_TTF:
-            switch (font_size) {
-                case 16:
-                    return &c_thai_16;
-                case 18:
-                    return &c_thai_18;
-                case 22:
-                    return &c_thai_22;
-                default:
-                    /* 其余字号只渲染数字/单位等纯 ASCII，回退通用字体，
-                     * 避免返回 NULL 导致 lv_obj_set_style_text_font(label, NULL) 丢字体 */
-                    return aic_get_c_font(DEFAULT_TTF, font_size);
-            }
         case SPEEDLABEL_TTF:
             switch (font_size) {
-                case 32:
-                    return &c_speedlabel_32;
                 case 36:
                     return &c_speedlabel_36;
                 case 90:
@@ -205,15 +122,11 @@ const lv_font_t *aic_get_c_font(int font_id, int font_size)
                     return &c_default_16;
                 case 18:
                     return &c_default_18;
-                case 22:
-                    return &c_default_22;
-                case 24:
-                    return &c_default_24;
                 case 36:
                     return &c_default_36;
                 case 41:
                     return &c_default_41;
-
+                
                 default:
                     return NULL;
             }

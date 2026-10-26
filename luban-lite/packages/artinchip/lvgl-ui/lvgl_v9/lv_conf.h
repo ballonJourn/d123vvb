@@ -124,7 +124,7 @@
     #define LV_FREETYPE_CACHE_FT_GLYPH_CNT 256
 #endif
 
-#define LV_USE_GIF 0
+#define LV_USE_GIF 1
 
 #ifndef LV_CACHE_DEF_SIZE
 #define LV_CACHE_DEF_SIZE 8 * 1024 * 1024

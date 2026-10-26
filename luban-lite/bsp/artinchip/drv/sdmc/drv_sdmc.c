@@ -699,23 +699,11 @@ void aic_mmcsd_change(u8 id)
         mmcsd_change(g_aic_sdmc_host[id]->rthost);
 }
 
-#define WIFI_BT_POWER_PIN_GPIO   "PD.2"
-
-static void sys_pwr_init(void) {
-    uint32_t stb_pin = 0;
-    stb_pin = rt_pin_get(WIFI_BT_POWER_PIN_GPIO);
-    rt_pin_mode(stb_pin, PIN_MODE_OUTPUT);
-    rt_pin_write(stb_pin, PIN_HIGH);
-    printf("set wifi bt pwr pin %s to output\n", WIFI_BT_POWER_PIN_GPIO);
-}
-
 static int drv_sdmc_init(void)
 {
     int i;
     rt_err_t ret = RT_EOK;
-    sys_pwr_init();
-    aic_mdelay(100);  /* wait for power stable */    
-    
+
     for (i = 0; i < ARRAY_SIZE(sdmc_pdata); i++) {
         ret = aic_sdmc_probe(&sdmc_pdata[i]);
         if (ret)

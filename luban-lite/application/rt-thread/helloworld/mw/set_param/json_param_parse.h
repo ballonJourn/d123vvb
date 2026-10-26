@@ -38,13 +38,9 @@ extern "C" {
 #define UUID_INFO_OBJECT        "uuid"
 #define RESERVE_OBJECT		    "reserve"
 #define RESERVE1_OBJECT		    "reserve1"
-#define REF_MILE_OBJECT         "ref_mile"
 
 #define RESERVE_SUB_OBJECT       "reserve"
 #define INT_RESERVE_SUB_OBJECT   "int_reserve"
-
-///< ref_mile json object: 三包参考里程数组, 平铺编号键 (8bit × 0.01km)
-#define REF_MILE_SUB_FMT         "p%d_ref_mile%d"
 
 ///< system json object
 #define S_THEME		            "theme"
@@ -64,7 +60,6 @@ extern "C" {
 #define S_AUTO_HEADLIGHT        "auto_hedlight"
 #define S_SYS_LOG               "sys_log"
 #define S_DRIVE_MODE            "drive_mode"
-#define S_RESET_TYPE            "reset_type"
 
 ///< tpms json object
 #define T_L_F_TPMS_ID           "l_front_tpms_id"
@@ -79,9 +74,6 @@ extern "C" {
 #define T_L_R_TEMP               "l_rear_temp"
 #define T_R_F_TEMP               "r_front_temp"
 #define T_R_R_TEMP               "r_rear_temp"
-///< 蓝牙胎压传感器 MAC (12 位 hex 字符串, 如 "AABBCCDDEEFF")
-#define T_L_F_MAC               "l_front_mac"
-#define T_L_R_MAC               "l_rear_mac"
 
 ///< update json object
 #define U_UPDATE_MCU            "update_mcu"

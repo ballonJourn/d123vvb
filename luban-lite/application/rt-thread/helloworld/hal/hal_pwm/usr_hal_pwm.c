@@ -6,7 +6,7 @@
 
 int hal_pwm_config(int id, uint32_t duty_ns, uint32_t period_ns) {
     struct rt_device_pwm *pwm_dev = RT_NULL;
-    pwm_dev = (struct rt_device_pwm *)rt_device_find("epwm");
+    pwm_dev = (struct rt_device_pwm *)rt_device_find("pwm");
 
     if (pwm_dev == NULL) {
         rt_log_error("can't find pwm device!\n");

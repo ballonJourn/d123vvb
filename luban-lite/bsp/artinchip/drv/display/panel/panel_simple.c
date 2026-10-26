@@ -127,22 +127,6 @@ static struct display_timing timing_1024_600 = {
 #endif
 
 #ifdef AIC_DISP_LVDS
-static struct display_timing timing_800_480 = {
-    .pixelclock   = 26 * 1000000,
-
-    .hactive      = 800,
-    .hback_porch  = 40,
-    .hfront_porch = 20,
-    .hsync_len    = 6,
-
-    .vactive      = 480,
-    .vback_porch  = 8,
-    .vfront_porch = 20,
-    .vsync_len    = 8,
-
-    .flags        = AIC_DISPLAY_FLAGS,
-};
-
 static struct display_timing timing_1920_1080 = {
     .pixelclock   = 142 * 1000000,
 
@@ -158,8 +142,6 @@ static struct display_timing timing_1920_1080 = {
 
     .flags        = AIC_DISPLAY_FLAGS,
 };
-
-
 #endif
 
 #ifdef AIC_DISP_RGB
@@ -233,12 +215,6 @@ static struct panel_desc lvds_desc[] = {
         .name = "custom",
         .lvds = &lvds,
         .timings = &timing_custom,
-        .funcs = &simple_funcs,
-    },
-    [3] = {
-        .name = "800x480",
-        .lvds = &lvds,
-        .timings = &timing_800_480,
         .funcs = &simple_funcs,
     },
 };

@@ -10,14 +10,9 @@
 #include "lvgl.h"
 #include "font_list.h"
 
-/* 列序 = 枚举值：translations[key][current_lang] 直接以枚举作列下标，勿调整顺序 */
 typedef enum {
-    AIC_LANG_CH = 0,   /* 中文 */
-    AIC_LANG_EN,       /* 英文 */
-    AIC_LANG_KO,       /* 韩文 */
-    AIC_LANG_SG,       /* 新加坡（文案同英文列） */
-    AIC_LANG_TH,       /* 泰文 */
-    AIC_LANG_NUM
+    AIC_LANG_CH,
+    AIC_LANG_EN
 } lang_type_t;
 
 typedef struct {
@@ -56,68 +51,11 @@ typedef enum {
     trip,
     unit,
     unit_km,
-    unit_mile,
-    ///< CAN 弹窗提示 (pop_tip) 文案
-    pop_seat_unlock,
-    pop_batt_low,
-    pop_cruise_fault,
-    pop_nfc_learning,
-    pop_nfc_success,
-    pop_nfc_failure,
-    pop_tpms_init,
-    pop_tpms_success,
-    pop_tpms_failed,
-    pop_upgrade,
-    pop_upgrade_failed,
-    pop_upgrade_success,
-
-    /* ===== 设置菜单 L1 卡片 + L1 顶部标题 ===== */
-    set_up,
-    cruise_control,
-    unlock_seat,
-    reset_trip,
-    power_down,
-    instrument_settings,
-    meter_view,
-
-    /* ===== L2/L3/L4 标题（全大写风格，与下方同名选项分列，因 LVGL 无大小写转换） ===== */
-    instrument_settings_title,
-    brightness_settings_title,
-    brightness_title,
-    scene_title,
-    unit_settings_title,
-    restore_factory_title,
-
-    /* ===== L2/L3/L4 选项 ===== */
-    language_settings,
-    brightness_settings,
-    time_format,
-    unit_switch,
-    restore_factory,
-    tire_pressure,
-    view_faults,
-    sw_version,
-    scene,
-    daytime,
-    night,
-
-    /* ===== L2 reset trip 选项（两个互斥的清零方式） ===== */
-    reset_after_power_off,
-    reset_by_button,
-
-    /* ===== 语言列表自名（5 列同值：各语言以自己的文字显示） ===== */
-    lang_name_english,
-    lang_name_chinese,
-    lang_name_korean,
-    lang_name_singaporean,
-    lang_name_thai,
-
-    KEY_ID_NUM          /* 边界哨兵，必须位于末尾 */
+    unit_mile
 } key_id_t;
 
 #define DEFAULT_TTF 0
 #define SPEEDLABEL_TTF 1
-#define THAI_TTF 2
 
 void aic_set_language(lang_type_t lang);
 

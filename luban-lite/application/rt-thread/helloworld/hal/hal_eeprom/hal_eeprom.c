@@ -3,9 +3,6 @@
 #include <rtdevice.h>
 #include <string.h>
 #include <board.h>
-#include <stdlib.h>
-#include <stdint.h>
-#include <stdbool.h>
 #include "hal_eeprom.h"
 #include "app_log.h"
 
@@ -14,78 +11,75 @@
 #define E2PROM_DEV_NAME "i2c0"
 #define DEBUG_E2PROM_ENABLE
 
-/* I2C 重试: 与 NFC 共用 i2c0, 启动期 NFC NPD 状态稳定窗口可能持续几十 ms.
- * 历史值 (3 次 × 1ms) 在系统启动早期不够, 见 rt_i2c_transfer error 0 报错.
- * 8 × 5ms = 最坏 ~40ms 兜底, 对正常运行期没有副作用 (一次就过). */
-#define E2PROM_RETRY_COUNT     8
-#define E2PROM_RETRY_DELAY_MS  5
-
 typedef struct rt_i2c_bus_device * e2prom_dev_t;
 
 static e2prom_dev_t e2prom_i2c = NULL;
 static rt_mutex_t lock;
 
 #if  0
+static int read_regs(e2prom_dev_t dev, uint8_t len, uint8_t *buf) {
+    struct rt_i2c_msg  msgs;
 
-static uint8_t t24c08a_read_one_byte(uint16_t addr) {
+    msgs.addr = T24C08A_DEV_ADDR;
+    msgs.flags = RT_I2C_RD;
+    msgs.buf = buf;
+    msgs.len = len;
+
+    if (rt_i2c_transfer(dev, &msgs, 1) == 1) {
+        return 0;
+    }
+
+    return -1;
+}
+
+uint8_t t24c08a_read_one_byte(uint16_t addr) {
     if (!e2prom_i2c) {
         rt_log_error("i2c0 dev not open!\n");
         return 0;
     }
+
+    uint8_t buf[2];
+    uint8_t temp = 0;
 
     if (addr >= E2PROM_CAPACITY_BYTE) {
         rt_log_error("t24c08a byte read out of size!\n");    
         return 0;
     }
 
-    struct rt_i2c_msg msgs[2];
-    uint8_t data;
-    uint8_t reg = (uint8_t)(addr & 0xff);
+    buf[0] = (uint8_t)(addr >> 8);
+    buf[1] = (uint8_t)(addr & 0xff);
 
-    msgs[0].addr  = T24C08A_DEV_ADDR | ((addr >> 8) & 0x03);
-    msgs[0].flags = RT_I2C_WR;
-    msgs[0].buf   = &reg;
-    msgs[0].len   = 1;
-
-    msgs[1].addr  = T24C08A_DEV_ADDR | ((addr >> 8) & 0x03);
-    msgs[1].flags = RT_I2C_RD;
-    msgs[1].buf   = &data;
-    msgs[1].len   = 1;
-
-    if (rt_i2c_transfer(e2prom_i2c, msgs, 2) != 2) {
-        rt_log_error("read one byte failed!\n");
+    if (rt_i2c_master_send(e2prom_i2c, T24C08A_DEV_ADDR, 0, buf, 2) == 0) {
         return 0;
     }
 
-    return data;
+    if (read_regs(e2prom_i2c, 1, &temp) != 0) {
+        rt_log_error("t24c08a read regs failed!\n");    
+        return 0;
+    }
+
+    return temp;
 }
 
-static int t24c08a_write_one_byte(uint16_t addr, uint8_t data) {
+int t24c08a_write_one_byte(uint16_t addr, uint8_t data) {
     if (addr >= E2PROM_CAPACITY_BYTE) {
         rt_log_error("t24c08a byte write out of size!\n");    
         return -1;
     }
 
-    struct rt_i2c_msg msgs;
-    uint8_t buf[2] = {0};
-
-    buf[0] = (uint8_t)(addr & 0xff);
-    buf[1] = data;
-
-    msgs.addr = T24C08A_DEV_ADDR | ((addr >> 8) & 0x03);
-    msgs.flags = RT_I2C_WR;
-    msgs.buf = buf;
-    msgs.len = 2;
-
-    if (rt_i2c_transfer(e2prom_i2c, &msgs, 1) != 1) {
-        rt_log_error("t24c08a write one byte failed!\n");    
-        return -1;
+    uint8_t buf[3] = {0};
+    buf[0] = (uint8_t)(addr >> 8);
+    buf[1] = (uint8_t)(addr & 0xff);
+    buf[2] = data;
+    
+    if (rt_i2c_master_send(e2prom_i2c, T24C08A_DEV_ADDR, 0, buf, 3) == 3) {
+        return 0;
     }
 
-    return 0;
+    return -1;
 }
 
-static int t24c08a_read_page(uint16_t addr, uint8_t *buffer, uint16_t num) {
+int t24c08a_read_page(uint16_t addr, uint8_t *buffer, uint16_t num) {
     if (addr >= E2PROM_CAPACITY_BYTE || !buffer || 
         (addr + num) > E2PROM_CAPACITY_BYTE) {
         rt_log_error("t24c08a page read out of size!\n");    
@@ -93,50 +87,52 @@ static int t24c08a_read_page(uint16_t addr, uint8_t *buffer, uint16_t num) {
     }
 
     struct rt_i2c_msg msgs[2];
-    uint8_t reg = (uint8_t)(addr & 0xff);
+    uint8_t addr_buf[2];
 
-    msgs[0].addr = T24C08A_DEV_ADDR | ((addr >> 8) & 0x03); 
+    msgs[0].addr = T24C08A_DEV_ADDR;
     msgs[0].flags = RT_I2C_WR;
-    msgs[0].buf = &reg;
-    msgs[0].len = 1;
+    addr_buf[0] = (uint8_t)(addr >> 8);
+    addr_buf[1] = (uint8_t)(addr & 0xff);
+    msgs[0].buf = addr_buf;
+    msgs[0].len = 2;
 
-    msgs[1].addr = T24C08A_DEV_ADDR | ((addr >> 8) & 0x03);
+    msgs[1].addr = T24C08A_DEV_ADDR;
     msgs[1].flags = RT_I2C_RD;
     msgs[1].buf = buffer;
     msgs[1].len = num;
 
-    if (rt_i2c_transfer(e2prom_i2c, msgs, 2) != 2) {
-        rt_log_error("t24c08a read page failed!\n");    
-        return -1;
+    if (rt_i2c_transfer(e2prom_i2c, msgs, 2) == 2) {
+        return 0;
     }
 
-    return 0;
+    return -1;
 }
 
-static int t24c08a_write_page(uint16_t addr, uint8_t *buffer, uint16_t num) {
+int t24c08a_write_page(uint16_t addr, uint8_t *buffer, uint16_t num) {
     if (!buffer || addr >= E2PROM_CAPACITY_BYTE ||
-        (addr + num) > E2PROM_CAPACITY_BYTE || num > 16) {
+        (addr + num) > E2PROM_CAPACITY_BYTE) {
         rt_log_error("t24c08a page write out of size!\n");    
         return -1;
     }
 
     struct rt_i2c_msg msgs;
-    uint8_t write_buff[18] = {0};
-    write_buff[0] = (uint8_t)(addr & 0xff);
+    uint8_t write_buff[E2PROM_CAPACITY_BYTE + 2] = {0};
 
-    memcpy(&write_buff[1], buffer, num);
+    write_buff[0] = (uint8_t)(addr >> 8);
+    write_buff[1] = (uint8_t)(addr & 0xff);
 
-    msgs.addr = T24C08A_DEV_ADDR | ((addr >> 8) & 0x03);
+    memcpy(&write_buf[2], buffer, num);
+
+    msgs.addr = T24C08A_DEV_ADDR;
     msgs.flags = RT_I2C_WR;
-    msgs.buf = write_buff;
-    msgs.len = num + 1;
+    msgs.buf = buffer;
+    msgs.len = num + 2;
 
-    if (rt_i2c_transfer(e2prom_i2c, &msgs, 1) != 1) {
-        rt_log_error("t24c08a write page failed!\n");    
-        return -1;
+    if (rt_i2c_transfer(e2prom_i2c, &msgs, 1) == 1) {
+        return 0;
     }
 
-    return 0;
+    return -1;
 }
 
 int t24c08a_check(void) {
@@ -170,7 +166,7 @@ int t24c08a_read(uint16_t addr, uint8_t *buffer, uint16_t num) {
     result = rt_mutex_take(lock, RT_WAITING_FOREVER);
     if (result == 0) {
         while (num) {
-            *buffer++ = t24c08a_read_one_byte(addr++);
+            *buffer++ = t24c08a_write_one_byte(addr++);
             num--;
         }
     }  else {
@@ -287,7 +283,6 @@ int t24c08a_page_write(uint16_t addr, uint8_t *buffer, uint16_t num) {
 
     return result;
 }
-
 #else 
 
 int e2prom_byte_write (uint16_t addr,uint8_t *buf, uint8_t length) {
@@ -300,18 +295,19 @@ int e2prom_byte_write (uint16_t addr,uint8_t *buf, uint8_t length) {
     }
 
     struct rt_i2c_msg msg;
-    uint8_t write_buff[2] = {0};
+    uint8_t write_buff[3] = {0};
 
     int ret = 0;
     for (int i = 0; i < length; i++) {
-        memset(write_buff, 0, 2);
-        write_buff[0] = (uint8_t)((addr + i) & 0xff);
-        memcpy(&write_buff[1], &buf[i], 1);
+        memset(write_buff, 0, 3);
+        write_buff[0] = (uint8_t)((addr + i) >> 8);
+        write_buff[1] = (uint8_t)((addr + i) & 0xFF);
+        memcpy(&write_buff[2], &buf[i], 1);
 
-        msg.addr = T24C08A_DEV_ADDR | (((addr + i) >> 8) & 0x03);
-        msg.flags = RT_I2C_WR; 
+        msg.addr = T24C08A_DEV_ADDR;
+        msg.flags = RT_I2C_WR; ///< 写操作
         msg.buf = write_buff;
-        msg.len = 2;
+        msg.len = 3;
         retires = 0;
         while (retires < 3) {
             ret = rt_i2c_transfer(e2prom_i2c, &msg, 1);
@@ -340,21 +336,23 @@ int e2prom_byte_read (uint16_t addr, uint8_t *buf, uint8_t length) {
     }
 
     struct rt_i2c_msg msg[2];
-    uint8_t reg;
+    uint8_t read_buff[2] = {0};
 
     int ret = 0;
     for (int i = 0; i < length; i++) {
-        reg = (uint8_t)((addr + i) & 0xff);
+        read_buff[0] = (uint8_t)((addr + i) >> 8);
+        read_buff[1] = (uint8_t)((addr + i) & 0xFF);
 
-        msg[0].addr = T24C08A_DEV_ADDR | (((addr + i) >> 8) & 0x03);
-        msg[0].flags = RT_I2C_WR; 
-        msg[0].buf = &reg;
-        msg[0].len = 1;
+        msg[0].addr = T24C08A_DEV_ADDR;
+        msg[0].flags = RT_I2C_WR; ///< 写操作
+        msg[0].buf = read_buff;
+        msg[0].len = 2;
 
-        msg[1].addr = T24C08A_DEV_ADDR | (((addr + i) >> 8) & 0x03);
-        msg[1].flags = RT_I2C_RD; 
+        msg[1].addr = T24C08A_DEV_ADDR;
+        msg[1].flags = RT_I2C_RD; ///< 读操作
         msg[1].buf = &buf[i];
         msg[1].len = 1;
+
         retires = 0;
         while (retires < 3) {
             ret = rt_i2c_transfer(e2prom_i2c, msg, 2);
@@ -373,113 +371,184 @@ int e2prom_byte_read (uint16_t addr, uint8_t *buf, uint8_t length) {
 }
 
 int e2prom_write_data(uint16_t addr, uint8_t *buf, int size) {
-    if ((e2prom_i2c == NULL) || (size < 1) 
-        || (addr >= E2PROM_CAPACITY_BYTE) 
+    struct rt_i2c_msg msg;
+    uint16_t page_cnt = 0;
+    uint16_t msg_buff_size = 0;
+    uint8_t page_first_size = 0;
+    uint8_t page_last_size = 0;
+    uint8_t retries = 0;
+    uint8_t msg_addr = 0;
+
+    int ret = 0;
+
+    if ((size < 1) || (addr >= E2PROM_CAPACITY_BYTE) 
         || ((addr + size) > E2PROM_CAPACITY_BYTE)) {
-        rt_log_error("e2prom byte write out of size!\n");    
+        rt_log_error("e2prom write data out of size!\n");    
         return -1;
     }
 
-    uint16_t write_data = 0;
-    uint8_t retries;
-    uint16_t page_start;
-    uint16_t page_size;
-    uint16_t remain_data;
-    uint16_t write_len;
+    ///< 地址是按照页划分，16个字节为一页
+    if (addr % E2PROM_PAGE_SIZE) {
+        rt_log_error("e2prom write data add error!\n");    
+        return -2;
+    } else {
+        page_cnt = (size - 1) / E2PROM_PAGE_SIZE + 1;
+        if (size < E2PROM_PAGE_SIZE) {
+            page_first_size = size;
+        } else {
+            page_first_size = E2PROM_PAGE_SIZE;
+        }
 
-    while (write_data < size) {
-        ///< 计算当前页起始地址（页大小 16 字节）
-        page_start = (addr + write_data) & ~(E2PROM_PAGE_SIZE - 1);
-        page_size = E2PROM_PAGE_SIZE - ((addr + write_data) - page_start);
-        remain_data = size - write_data;
-        write_len = (remain_data < page_size) ? remain_data : page_size;
+        page_last_size = size & 0xf;
+        if (page_last_size == 0) {
+            page_last_size = 16;
+        }
+    }
 
-        struct rt_i2c_msg msgs[2];
-        uint8_t reg = (uint8_t)((addr + write_data) & 0xff);   
+    uint8_t *write_buff = (uint8_t *)rt_malloc(18);
+    if (!write_buff) {
+        rt_log_error("e2prom write data rt_malloc fail!\n");    
+        return -3;
+    }
 
-        msgs[0].addr  = T24C08A_DEV_ADDR | (((addr + write_data) >> 8) & 0x03);
-        msgs[0].flags = RT_I2C_WR;
-        msgs[0].buf   = &reg;
-        msgs[0].len   = 1;
+    msg_addr = addr;
+    uint8_t *src = buf;
 
-        msgs[1].addr  = T24C08A_DEV_ADDR | (((addr + write_data) >> 8) & 0x03);
-        msgs[1].flags = RT_I2C_WR;
-        msgs[1].buf   = (uint8_t*)(buf + write_data);
-        msgs[1].len   = write_len;
+    for (uint16_t i = 0; i < page_cnt; i++) {
+        memset(write_buff, 0, 18);
+        write_buff[0] = (uint8_t)(msg_addr >> 8);
+        write_buff[1] = (uint8_t)(msg_addr & 0xff);
+        if (i == 0) {
+            msg_buff_size = page_first_size;
+        } else if (i == page_cnt - 1) {
+            msg_buff_size = page_last_size;
+        } else {
+            msg_buff_size = E2PROM_PAGE_SIZE;
+        }
+
+        memcpy(write_buff + 2, src, msg_buff_size);
+        msg.addr = T24C08A_DEV_ADDR;
+        msg.flags = RT_I2C_WR;
+        msg.buf = write_buff;
+        msg.len = msg_buff_size + 2;
 
         retries = 0;
-        int ret = 0;
-        while (retries < E2PROM_RETRY_COUNT) {
-            ret = rt_i2c_transfer(e2prom_i2c, msgs, 2);
-            if (ret == 2) {
+        while (retries < 3) {
+            ret = rt_i2c_transfer(e2prom_i2c, &msg, 1);
+            if (ret == 1) {
                 break;
             } else {
                 retries++;
-                rt_log_error("Error: I2C transfer error %d, retry %d\n", ret, retries);
-                rt_thread_mdelay(E2PROM_RETRY_DELAY_MS);
+                rt_log_error("rt_i2c_transfer error:%d\n", ret);
             }
         }
-        if (retries >= E2PROM_RETRY_COUNT) {
-            rt_log_error("Error: failed to write at addr 0x%04X\n", addr + write_data);
-            return -1;
+
+        if (retries == 0) {
+            msg_addr += msg_buff_size;
+            src += msg_buff_size;
+            rt_thread_mdelay(5);
+        } else {
+            break;
         }
-
-        rt_thread_mdelay(5);
-
-        write_data += write_len;
     }
 
-    return size;
+    rt_free(write_buff);
+
+    return (msg_addr - addr);
 }
 
 int e2prom_read_data(uint16_t addr, uint8_t *buf, int size) {
+    struct rt_i2c_msg msg[2];
+    int ret;
+    uint8_t retries = 0;
+    uint16_t msg_cnt = 0;
+    uint16_t msg_buf_size;
+    uint16_t msg_addr;
+    uint8_t page_off;
+    uint8_t page_last_size;
+    uint8_t page_first_size;
+
     if((size < 1) || addr >= E2PROM_CAPACITY_BYTE 
         || (addr + size) > E2PROM_CAPACITY_BYTE) {
         rt_log_error("e2prom read data out of size!\n");    
         return -1;
     }
 
-    struct rt_i2c_msg msgs[2];
-    uint8_t retries = 0;
-    int ret = 0;
-    uint8_t reg = (uint8_t)(addr & 0xff);
-
-    msgs[0].addr = T24C08A_DEV_ADDR | ((addr >> 8) & 0x03); 
-    msgs[0].flags = RT_I2C_WR;
-    msgs[0].buf = &reg;
-    msgs[0].len = 1;
-
-    msgs[1].addr = T24C08A_DEV_ADDR | ((addr >> 8) & 0x03);
-    msgs[1].flags = RT_I2C_RD;
-    msgs[1].buf = buf;
-    msgs[1].len = size;
-
-    while (retries < E2PROM_RETRY_COUNT) {
-        ret = rt_i2c_transfer(e2prom_i2c, msgs, 2);
-        if (ret == 2) {
-            break;
+    page_off = addr % 16;
+    if(page_off) {
+        rt_log_error("e2prom read data add error!\n");    
+        return -2;
+    } else {
+        msg_cnt = (size - 1) / 16 + 1;
+        if (size < 16) {
+            page_first_size = size;
         } else {
-            retries++;
-            rt_log_error("rt_i2c_transfer error %d.\n", ret);
-            rt_thread_mdelay(E2PROM_RETRY_DELAY_MS);
+            page_first_size = 16;
+        }
+
+        page_last_size = size & 0xf;
+        if(page_last_size == 0) {
+            page_last_size = 16;
         }
     }
 
-    if (retries < E2PROM_RETRY_COUNT) {
-        return size;
+    msg_addr = addr;
+    uint8_t *dst = buf;
+    uint8_t read_buff[2] = {0};
+
+    for (uint16_t i = 0; i < msg_cnt; i++) {
+        if (i == 0) {
+            msg_buf_size = page_first_size;
+        } else if(i == msg_cnt-1) {
+            msg_buf_size = page_last_size;
+        } else {
+            msg_buf_size = 16;
+        }
+
+        read_buff[0] = (uint8_t)(msg_addr >> 8);
+        read_buff[1] = (uint8_t)(msg_addr & 0xff);
+
+        msg[0].addr = T24C08A_DEV_ADDR;
+        msg[0].flags = RT_I2C_WR;
+        msg[0].buf = read_buff;
+        msg[0].len = 2;
+
+        msg[1].addr = T24C08A_DEV_ADDR;
+        msg[1].flags = RT_I2C_RD;
+        msg[1].buf = dst;
+        msg[1].len = msg_buf_size;
+
+        retries = 0;
+        while (retries < 3) {
+            ret = rt_i2c_transfer(e2prom_i2c, msg, 2);
+            if (ret == 2) {
+                break;
+            } else {
+                retries++;
+                rt_log_error("rt_i2c_transfer error %d.\n", ret);
+            }
+        }
+
+        if (retries == 0) {
+            msg_addr += msg_buf_size;
+            dst += msg_buf_size;
+        } else {
+            break;
+        }
     }
 
-    return -1;
+    return (msg_addr - addr);
 }
 
-static int __attribute__((unused)) e2prom_test(uint16_t addr, int size,uint8_t start_data) {
+int e2prom_test(uint16_t addr, int size, uint16_t start_data) {
     uint8_t* w_buf = (uint8_t*)rt_malloc(size);
     uint8_t* r_buf = (uint8_t*)rt_malloc(size);
 
     int rtn = 0;
+    uint16_t *p = (uint16_t *)w_buf;
 
     rt_log_info("%s(0x%08X, %d)\r\n",__FUNCTION__, addr, size);
-    if (w_buf == NULL || r_buf == NULL) {
+    if (w_buf == NULL || r_buf==NULL) {
         rt_log_error("%s pvPortMalloc fail!\r\n",__FUNCTION__);
         rtn = -1;
         goto _error1;
@@ -488,8 +557,8 @@ static int __attribute__((unused)) e2prom_test(uint16_t addr, int size,uint8_t s
     memset(w_buf, 0, size);
     memset(r_buf, 0, size);
 
-    for (uint16_t i = 0; i < size; i++) {
-        w_buf[i] = start_data + i;
+    for (uint16_t i = 0; i < size / 2; i++) {
+        p[i] = start_data + i;
     }
 
     rtn = e2prom_write_data(addr, w_buf, size);
@@ -498,7 +567,7 @@ static int __attribute__((unused)) e2prom_test(uint16_t addr, int size,uint8_t s
         rtn = -2;
         goto _error1;
     } else {
-        rt_log_info("eeprom_write %d bytes\r\n",rtn);
+        rt_log_error("eeprom_write %d bytes\r\n",rtn);
     }
 
     rtn = e2prom_read_data(addr, r_buf, size);
@@ -507,7 +576,7 @@ static int __attribute__((unused)) e2prom_test(uint16_t addr, int size,uint8_t s
         rtn = -3;
         goto _error1;
     } else {
-        rt_log_info("eeprom_read %d bytes\r\n",rtn);
+        rt_log_error("eeprom_read %d bytes\r\n",rtn);
     }
 
 #ifdef DEBUG_E2PROM_ENABLE
@@ -548,26 +617,9 @@ _error1:
     return rtn;
 }
 
-#endif
-
-void clear_e2mprom(void) {
-    uint8_t writre_buff[E2PROM_CAPACITY_BYTE] = {0};
-    int write_num = 0;
-
-    memset(writre_buff, 0xff, E2PROM_CAPACITY_BYTE);
-    write_num = e2prom_write_data(0x00, writre_buff, E2PROM_CAPACITY_BYTE);
-    if (write_num != E2PROM_CAPACITY_BYTE) {
-        rt_log_info("clear e2prom failed..\n");
-        return;
-    }
-
-    rt_log_info("clear e2prom success, os will reboot...\n");
-    rt_thread_mdelay(1000); 
-    system("reboot");
-}
-
 int e2prom_init(void) {
     if (e2prom_i2c) { 
+        return 0;
         rt_log_info("e2prom_i2c dev already open!\n");
         return 0;
     }
@@ -587,4 +639,5 @@ int e2prom_init(void) {
     return 0;
 }
 
+#endif
 #endif
