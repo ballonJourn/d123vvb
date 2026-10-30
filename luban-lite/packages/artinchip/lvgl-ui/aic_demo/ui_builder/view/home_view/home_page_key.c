@@ -11,6 +11,8 @@ void home_manager_click(const click_e click)
             window_manager_set_target(WINDOW_MENU) ;
             break;
         case CLICK_SHORT_UP:
+            /* UP key on the home page is the DVR page entry point. */
+            window_manager_set_target(WINDOW_DEVICE) ;
             break;
         case CLICK_LONG_SET:
             window_manager_set_target(WINDOW_MOBILE) ;

@@ -7,6 +7,7 @@
 #include "selfcheck.h"
 #include "key_common.h"
 #include "dev_config.h"
+#include "dvr_page.h"
 
 typedef enum {
   BUTTON_STATE_CALL,
@@ -46,6 +47,9 @@ static void handle_non_call_state() {
         break;
     case WINDOW_MOBILE:
         phone_manager_click(current_click);
+        break;
+    case WINDOW_DEVICE:
+        dvr_manager_click(current_click);
         break;
     default:
         break;
