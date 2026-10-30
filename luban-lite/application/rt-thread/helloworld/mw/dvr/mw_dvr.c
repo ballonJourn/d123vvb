@@ -88,7 +88,15 @@ static int32_t dvr_display_width = LCD_WIDTH;   // Width of display window
 static int32_t dvr_display_height = LCD_HEIGHT; // Height of display window
 
 // Preview mode control flag (for skip jpeg decode when UI not in preview)
-static uint8_t dvr_preview_enable = 1;  // 0: skip jpeg decode, 1: enable jpeg decode
+// Default OFF: plugging in the DVR USB only connects + queries status in the
+// background (dvr_usb_task keeps running for that). It must NOT decode/render
+// a fullscreen passthrough preview on its own anymore — that used to bypass
+// the new ui_builder dvr_page.c UI entirely (direct GE blit onto the UI-layer
+// framebuffer, repainted ~every 10ms, which visually overwrote dvr_page.c's
+// own dock/buttons even after the UP key switched the active LVGL screen).
+// Preview now only turns on via dvr_start_preview() -> dvr_api_set_preview_enable(1),
+// i.e. only when the user opens the DVR page (home page's UP key -> dvr_page_create()).
+static uint8_t dvr_preview_enable = 0;  // 0: skip jpeg decode, 1: enable jpeg decode
 
 static uint8_t dvr_ui_hidden = 0;
 
