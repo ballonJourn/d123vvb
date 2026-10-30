@@ -628,7 +628,21 @@ static void build_layout(lv_obj_t *parent)
 
     dvr_main_view = mk_panel(parent, 0, 0, 1024, 600);
 
-    dvr_main_bg = mk_img(dvr_main_view, LVGL_IMAGE_PATH(dvr/ui_img_dvr_bg.png), 0, 0, 1024, 500);
+    /* ui_img_dvr_bg.png was a full 1024x500 bitmap, but sampling its own
+     * pixel data showed it is >94% a single flat fill (0xC1DBFD) with
+     * only a small "DVR" logo graphic on top (bbox ~337x127px). Decoding
+     * the full image just to show a mostly-flat fill wastes VE decode
+     * time and an 8-slot-shared LVGL image-cache entry on this already
+     * PSRAM-constrained board — replaced with a plain bg_color fill (no
+     * decoder/cache use at all) plus ui_img_dvr_logo.png, a transparent-
+     * background crop of just the logo (367x157, ~11% of the original
+     * pixel count), positioned to land exactly where the logo sat in the
+     * original full image. dvr_main_bg still names the logo image object
+     * so the existing W_VISIBLE(dvr_main_bg, ...) show/hide call below
+     * keeps working unchanged. */
+    lv_obj_set_style_bg_color(dvr_main_view, lv_color_hex(0xC1DBFD), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(dvr_main_view, LV_OPA_COVER, LV_PART_MAIN);
+    dvr_main_bg = mk_img(dvr_main_view, LVGL_IMAGE_PATH(dvr/ui_img_dvr_logo.png), 331, 170, 367, 157);
 
 
     dvr_dock_bar = mk_panel(dvr_main_view, 0, 500, 1024, 100);
@@ -661,7 +675,10 @@ static void build_layout(lv_obj_t *parent)
 
 
     dvr_idle_view = mk_panel(parent, 0, 0, 1024, 600);
-    mk_img(dvr_idle_view, LVGL_IMAGE_PATH(dvr/ui_img_dvr_bg.png), 0, 0, 1024, 500);
+    /* Same flat-fill + small-logo replacement as dvr_main_view above. */
+    lv_obj_set_style_bg_color(dvr_idle_view, lv_color_hex(0xC1DBFD), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(dvr_idle_view, LV_OPA_COVER, LV_PART_MAIN);
+    mk_img(dvr_idle_view, LVGL_IMAGE_PATH(dvr/ui_img_dvr_logo.png), 331, 170, 367, 157);
     lv_obj_t *idle_dock = mk_panel(dvr_idle_view, 0, 500, 1024, 100);
     mk_img(idle_dock, LVGL_IMAGE_PATH(dvr/ui_img_dock_bg.png), 0, 0, 1024, 100);
     idle_tab_sel = mk_img(idle_dock, LVGL_IMAGE_PATH(dvr/ui_img_dock_selected.png), 0, 0, 512, 100);
@@ -673,7 +690,11 @@ static void build_layout(lv_obj_t *parent)
 
 
     dvr_list_view = mk_panel(parent, 0, 0, 1024, 600);
-    mk_img(dvr_list_view, LVGL_IMAGE_PATH(dvr/ui_img_dvr_list_bg.png), 0, 0, 1024, 600);
+    /* ui_img_dvr_list_bg.png is a 100% flat 0xC1DBFD fill, no graphic
+     * content at all — a plain bg_color draws the identical result with
+     * zero VE decode and zero image-cache slot used. */
+    lv_obj_set_style_bg_color(dvr_list_view, lv_color_hex(0xC1DBFD), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(dvr_list_view, LV_OPA_COVER, LV_PART_MAIN);
 
     lv_obj_t *scroll = mk_panel(dvr_list_view, 44, 10, 936, 480);
     lv_obj_add_flag(scroll, LV_OBJ_FLAG_SCROLLABLE);
@@ -723,14 +744,13 @@ static void build_layout(lv_obj_t *parent)
      * UP/DOWN-driven focus (hl_set()) moves onto them. */
     lv_obj_add_flag(dvr_setting_view, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scroll_dir(dvr_setting_view, LV_DIR_VER);
-    /* ui_img_dvr_list_bg.png is a flat 0xC1DBFD fill (sampled from its
-     * own pixel data), 1024x600. Set that same color on the panel itself
-     * first so the area below the original 600px (rows 4-7, reached by
-     * scrolling) is seamlessly the same color, then lay the actual PNG
-     * over the top 600px for row 0-3's unchanged look. */
+    /* ui_img_dvr_list_bg.png was a 100% flat 0xC1DBFD fill with no
+     * graphic content — the bg_color below draws the identical result
+     * for the whole scrollable height (original 600px rows AND the new
+     * rows 4-7 reached by scrolling) with zero decode/cache cost, so the
+     * image itself is no longer needed at all here. */
     lv_obj_set_style_bg_color(dvr_setting_view, lv_color_hex(0xC1DBFD), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(dvr_setting_view, LV_OPA_COVER, LV_PART_MAIN);
-    mk_img(dvr_setting_view, LVGL_IMAGE_PATH(dvr/ui_img_dvr_list_bg.png), 0, 0, 1024, 600);
 
 
     lv_obj_t *r0 = mk_panel(dvr_setting_view, 57, 110, 910, 80);
