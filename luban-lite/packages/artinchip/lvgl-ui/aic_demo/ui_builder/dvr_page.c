@@ -1,3 +1,5 @@
+#include "dvr_page.h"        /* own prototypes + click_e (via button_manager.h) —
+                               * needed for dvr_manager_click()'s parameter type below */
 #include "dvr_view.h"
 #include "mw_dvr.h"          /* dvr_api_* backend (see note in dvr_view.c) */
 #include "window_manager.h"  /* window_manager_set_target() — DVR exit on top-level BACK */
