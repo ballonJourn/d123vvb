@@ -128,6 +128,17 @@ static u32 dvr_fb_buf_index = 0;
  * (see dvr_capture_get_pic_process's `jpg_size > 300*1024` guard). */
 #define DVR_BITSTREAM_BUF_SIZE  (300 * 1024)
 
+/* DVR-EXPERIMENT: hardware downscale of the MJPEG decode output (VE).
+ *   0 = off  : decode at the stream size (1024x600). ABGR frame = 2.4 MB, which
+ *              mpp_phy_alloc() sends to the PSRAM SW heap (> 1 MB).
+ *   1 = 1/2  : 512x300 -> ABGR frame ~0.6 MB (< 1 MB, goes to the CMA heap)
+ *   2 = 1/4, 3 = 1/8
+ * GE then scales the small frame up to the display window in dvr_render_to_ui_layer().
+ * Set to 0 to restore the original behaviour. */
+#ifndef DVR_DEC_SCALE_SHIFT
+#define DVR_DEC_SCALE_SHIFT  3
+#endif
+
 // FPS print toggle (runtime, default ON). Controls whether the per-second
 // `DVR: [FPS:xx] frame_count=xx` log line is emitted. Toggled via CLI.
 static uint8_t dvr_fps_print_enable = 0;
@@ -231,6 +242,11 @@ static int dvr_render_to_ui_layer(struct mpp_fb *fb, struct mpp_frame *frame,
     blt.dst_buf.crop.x      = (int)offset_x;
     blt.dst_buf.crop.y      = (int)offset_y;
 
+#if DVR_DEC_SCALE_SHIFT
+    /* decoded frame is smaller than the window: let GE scale it up */
+    blt.dst_buf.crop.width  = width;
+    blt.dst_buf.crop.height = height;
+#else
     if (blt.src_buf.crop.width && blt.src_buf.crop.height) {
         blt.dst_buf.crop.width  = blt.src_buf.crop.width;
         blt.dst_buf.crop.height = blt.src_buf.crop.height;
@@ -238,6 +254,7 @@ static int dvr_render_to_ui_layer(struct mpp_fb *fb, struct mpp_frame *frame,
         blt.dst_buf.crop.width  = blt.src_buf.size.width;
         blt.dst_buf.crop.height = blt.src_buf.size.height;
     }
+#endif
 
     if (dvr_ge_bitblt(&blt) < 0)
         return -1;
@@ -315,6 +332,16 @@ static int dvr_decoder_init(void)
     config.extra_frame_num       = 0;
     config.packet_count          = 1;
     config.pix_fmt               = dvr_dec_pix_fmt;
+
+#if DVR_DEC_SCALE_SHIFT
+    {
+        struct mpp_scale_ratio ratio;
+        ratio.hor_scale = DVR_DEC_SCALE_SHIFT;
+        ratio.ver_scale = DVR_DEC_SCALE_SHIFT;
+        mpp_decoder_control(dvr_mpp_dec, MPP_DEC_INIT_CMD_SET_SCALE, &ratio);
+        printf("DVR: decoder hw downscale shift=%d\n", DVR_DEC_SCALE_SHIFT);
+    }
+#endif
 
     if (mpp_decoder_init(dvr_mpp_dec, &config) < 0) {
         printf("DVR: mpp_decoder_init failed\n");
