@@ -103,19 +103,19 @@ static dvr_sub_page_e no_sd_return_sub = DVR_SUB_MAIN;
 static inline uint8_t list_api_mode(void) { return (uint8_t)(list_mode * 2 + list_tab); }
 
 static const char *loading_imgs[8] = {
-    LVGL_IMAGE_PATH(dvr/dvr_loading_0.png), LVGL_IMAGE_PATH(dvr/dvr_loading_1.png),
-    LVGL_IMAGE_PATH(dvr/dvr_loading_2.png), LVGL_IMAGE_PATH(dvr/dvr_loading_3.png),
-    LVGL_IMAGE_PATH(dvr/dvr_loading_4.png), LVGL_IMAGE_PATH(dvr/dvr_loading_5.png),
-    LVGL_IMAGE_PATH(dvr/dvr_loading_6.png), LVGL_IMAGE_PATH(dvr/dvr_loading_7.png),
+    LVGL_IMAGE_PATH(dvr/ui_img_dvr_loading_0.png), LVGL_IMAGE_PATH(dvr/ui_img_dvr_loading_1.png),
+    LVGL_IMAGE_PATH(dvr/ui_img_dvr_loading_2.png), LVGL_IMAGE_PATH(dvr/ui_img_dvr_loading_3.png),
+    LVGL_IMAGE_PATH(dvr/ui_img_dvr_loading_4.png), LVGL_IMAGE_PATH(dvr/ui_img_dvr_loading_5.png),
+    LVGL_IMAGE_PATH(dvr/ui_img_dvr_loading_6.png), LVGL_IMAGE_PATH(dvr/ui_img_dvr_loading_7.png),
 };
 
 static const char *dock_icon_n[DVR_DOCK_BTN_MAX] = {
-    LVGL_IMAGE_PATH(dvr/icon_camera_n.png), LVGL_IMAGE_PATH(dvr/icon_playback_n.png),
-    LVGL_IMAGE_PATH(dvr/icon_photo_n.png),  LVGL_IMAGE_PATH(dvr/icon_settings_n.png),
+    LVGL_IMAGE_PATH(dvr/ui_img_icon_camera_n.png), LVGL_IMAGE_PATH(dvr/ui_img_icon_playback_n.png),
+    LVGL_IMAGE_PATH(dvr/ui_img_icon_photo_n.png),  LVGL_IMAGE_PATH(dvr/ui_img_icon_settings_n.png),
 };
 static const char *dock_icon_p[DVR_DOCK_BTN_MAX] = {
-    LVGL_IMAGE_PATH(dvr/icon_camera_p.png), LVGL_IMAGE_PATH(dvr/icon_playback_p.png),
-    LVGL_IMAGE_PATH(dvr/icon_photo_p.png),  LVGL_IMAGE_PATH(dvr/icon_settings_p.png),
+    LVGL_IMAGE_PATH(dvr/ui_img_icon_camera_p.png), LVGL_IMAGE_PATH(dvr/ui_img_icon_playback_p.png),
+    LVGL_IMAGE_PATH(dvr/ui_img_icon_photo_p.png),  LVGL_IMAGE_PATH(dvr/ui_img_icon_settings_p.png),
 };
 
 static void show_sub(dvr_sub_page_e sub)
@@ -183,8 +183,8 @@ static void hl_list(int i)
                 (n == i) ? lv_color_hex(0x00FF00) : lv_color_hex(0x083557),
                 LV_PART_MAIN);
         }
-        if (file_view_w[n]) lv_image_set_src(file_view_w[n], LVGL_IMAGE_PATH(dvr/icon_view_n.png));
-        if (file_del_w[n])  lv_image_set_src(file_del_w[n],  LVGL_IMAGE_PATH(dvr/icon_delete_n.png));
+        if (file_view_w[n]) lv_image_set_src(file_view_w[n], LVGL_IMAGE_PATH(dvr/ui_img_icon_view_n.png));
+        if (file_del_w[n])  lv_image_set_src(file_del_w[n],  LVGL_IMAGE_PATH(dvr/ui_img_icon_delete_n.png));
     }
 }
 
@@ -195,10 +195,10 @@ static void hl_list_act(int act)
     if (i >= 0 && i < DVR_FILE_ITEM_MAX) {
         if (file_view_w[i])
             lv_image_set_src(file_view_w[i],
-                (act == LIST_ACT_PLAY) ? LVGL_IMAGE_PATH(dvr/icon_view_p.png) : LVGL_IMAGE_PATH(dvr/icon_view_n.png));
+                (act == LIST_ACT_PLAY) ? LVGL_IMAGE_PATH(dvr/ui_img_icon_view_p.png) : LVGL_IMAGE_PATH(dvr/ui_img_icon_view_n.png));
         if (file_del_w[i])
             lv_image_set_src(file_del_w[i],
-                (act == LIST_ACT_DELETE) ? LVGL_IMAGE_PATH(dvr/icon_delete_p.png) : LVGL_IMAGE_PATH(dvr/icon_delete_n.png));
+                (act == LIST_ACT_DELETE) ? LVGL_IMAGE_PATH(dvr/ui_img_icon_delete_p.png) : LVGL_IMAGE_PATH(dvr/ui_img_icon_delete_n.png));
     }
 }
 
@@ -237,7 +237,7 @@ static void hl_set(int r)
     for (int i = 0; i < DVR_SET_ROW_MAX; i++) {
         if (set_row_bg[i]) {
             lv_image_set_src(set_row_bg[i],
-                (i == r) ? LVGL_IMAGE_PATH(dvr/settings_btn1_p.png) : LVGL_IMAGE_PATH(dvr/settings_btn1_n.png));
+                (i == r) ? LVGL_IMAGE_PATH(dvr/ui_img_settings_btn1_p.png) : LVGL_IMAGE_PATH(dvr/ui_img_settings_btn1_n.png));
         }
     }
 }
@@ -260,7 +260,7 @@ static void hl_popup(int f)
 
     if (popup_src == POP_NO_SD) {
         W_SHOW(popup_confirm_bg);
-        lv_image_set_src(popup_confirm_bg, LVGL_IMAGE_PATH(dvr/pop_up_btn_p.png));
+        lv_image_set_src(popup_confirm_bg, LVGL_IMAGE_PATH(dvr/ui_img_pop_up_btn_p.png));
         W_SHOW(popup_confirm_lbl);
         lv_label_set_text(popup_confirm_lbl, "OK");
         W_HIDE(popup_cancel_bg);
@@ -268,10 +268,10 @@ static void hl_popup(int f)
     } else {
         W_SHOW(popup_confirm_bg);
         lv_image_set_src(popup_confirm_bg,
-            (f == 0) ? LVGL_IMAGE_PATH(dvr/pop_up_btn_p.png) : LVGL_IMAGE_PATH(dvr/pop_up_btn_n.png));
+            (f == 0) ? LVGL_IMAGE_PATH(dvr/ui_img_pop_up_btn_p.png) : LVGL_IMAGE_PATH(dvr/ui_img_pop_up_btn_n.png));
         W_SHOW(popup_cancel_bg);
         lv_image_set_src(popup_cancel_bg,
-            (f == 1) ? LVGL_IMAGE_PATH(dvr/pop_up_btn_p.png) : LVGL_IMAGE_PATH(dvr/pop_up_btn_n.png));
+            (f == 1) ? LVGL_IMAGE_PATH(dvr/ui_img_pop_up_btn_p.png) : LVGL_IMAGE_PATH(dvr/ui_img_pop_up_btn_n.png));
         W_SHOW(popup_confirm_lbl);
         lv_label_set_text(popup_confirm_lbl, "OK");
         W_SHOW(popup_cancel_lbl);
@@ -289,7 +289,7 @@ static void popup_show_loading(void)
     W_HIDE(popup_cancel_lbl);
     if (popup_loading_w) {
         W_SHOW(popup_loading_w);
-        lv_image_set_src(popup_loading_w, LVGL_IMAGE_PATH(dvr/dvr_loading_0.png));
+        lv_image_set_src(popup_loading_w, LVGL_IMAGE_PATH(dvr/ui_img_dvr_loading_0.png));
     }
 }
 
@@ -530,45 +530,45 @@ static void build_layout(lv_obj_t *parent)
 
     dvr_main_view = mk_panel(parent, 0, 0, 1024, 600);
 
-    dvr_main_bg = mk_img(dvr_main_view, LVGL_IMAGE_PATH(dvr/dvr_bg.png), 0, 0, 1024, 500);
+    dvr_main_bg = mk_img(dvr_main_view, LVGL_IMAGE_PATH(dvr/ui_img_dvr_bg.png), 0, 0, 1024, 500);
 
 
     dvr_dock_bar = mk_panel(dvr_main_view, 0, 500, 1024, 100);
-    mk_img(dvr_dock_bar, LVGL_IMAGE_PATH(dvr/dock_bg.png), 0, 0, 1024, 100);
-    dock_btn[0] = mk_img(dvr_dock_bar, LVGL_IMAGE_PATH(dvr/icon_camera_n.png),   48,  0, 160, 100);
-    mk_img(dvr_dock_bar, LVGL_IMAGE_PATH(dvr/line.png), 256, 0, 1, 100);
-    dock_btn[1] = mk_img(dvr_dock_bar, LVGL_IMAGE_PATH(dvr/icon_playback_n.png), 304, 0, 160, 100);
-    mk_img(dvr_dock_bar, LVGL_IMAGE_PATH(dvr/line.png), 512, 0, 1, 100);
-    dock_btn[2] = mk_img(dvr_dock_bar, LVGL_IMAGE_PATH(dvr/icon_photo_n.png),    560, 0, 160, 100);
-    mk_img(dvr_dock_bar, LVGL_IMAGE_PATH(dvr/line.png), 768, 0, 1, 100);
-    dock_btn[3] = mk_img(dvr_dock_bar, LVGL_IMAGE_PATH(dvr/icon_settings_n.png), 816, 0, 160, 100);
+    mk_img(dvr_dock_bar, LVGL_IMAGE_PATH(dvr/ui_img_dock_bg.png), 0, 0, 1024, 100);
+    dock_btn[0] = mk_img(dvr_dock_bar, LVGL_IMAGE_PATH(dvr/ui_img_icon_camera_n.png),   48,  0, 160, 100);
+    mk_img(dvr_dock_bar, LVGL_IMAGE_PATH(dvr/ui_img_line.png), 256, 0, 1, 100);
+    dock_btn[1] = mk_img(dvr_dock_bar, LVGL_IMAGE_PATH(dvr/ui_img_icon_playback_n.png), 304, 0, 160, 100);
+    mk_img(dvr_dock_bar, LVGL_IMAGE_PATH(dvr/ui_img_line.png), 512, 0, 1, 100);
+    dock_btn[2] = mk_img(dvr_dock_bar, LVGL_IMAGE_PATH(dvr/ui_img_icon_photo_n.png),    560, 0, 160, 100);
+    mk_img(dvr_dock_bar, LVGL_IMAGE_PATH(dvr/ui_img_line.png), 768, 0, 1, 100);
+    dock_btn[3] = mk_img(dvr_dock_bar, LVGL_IMAGE_PATH(dvr/ui_img_icon_settings_n.png), 816, 0, 160, 100);
 
 
     dvr_cam_dock = mk_panel(dvr_main_view, 0, 500, 1024, 100);
-    mk_img(dvr_cam_dock, LVGL_IMAGE_PATH(dvr/dock_bg.png), 0, 0, 1024, 100);
-    dvr_cam_tab_sel = mk_img(dvr_cam_dock, LVGL_IMAGE_PATH(dvr/dock_selected.png), 0, 0, 341, 100);
-    mk_img(dvr_cam_dock, LVGL_IMAGE_PATH(dvr/line.png), 341, 0, 1, 100);
-    mk_img(dvr_cam_dock, LVGL_IMAGE_PATH(dvr/line.png), 682, 0, 1, 100);
+    mk_img(dvr_cam_dock, LVGL_IMAGE_PATH(dvr/ui_img_dock_bg.png), 0, 0, 1024, 100);
+    dvr_cam_tab_sel = mk_img(dvr_cam_dock, LVGL_IMAGE_PATH(dvr/ui_img_dock_selected.png), 0, 0, 341, 100);
+    mk_img(dvr_cam_dock, LVGL_IMAGE_PATH(dvr/ui_img_line.png), 341, 0, 1, 100);
+    mk_img(dvr_cam_dock, LVGL_IMAGE_PATH(dvr/ui_img_line.png), 682, 0, 1, 100);
     mk_label(dvr_cam_dock, "Front",  86, 19, 168, 61, 30);
     mk_label(dvr_cam_dock, "Rear",  427, 19, 168, 61, 30);
-    mk_img(dvr_cam_dock, LVGL_IMAGE_PATH(dvr/icon_photo_n.png), 812, 10, 80, 80);
+    mk_img(dvr_cam_dock, LVGL_IMAGE_PATH(dvr/ui_img_icon_photo_n.png), 812, 10, 80, 80);
     W_HIDE(dvr_cam_dock);
 
 
     dvr_idle_view = mk_panel(parent, 0, 0, 1024, 600);
-    mk_img(dvr_idle_view, LVGL_IMAGE_PATH(dvr/dvr_bg.png), 0, 0, 1024, 500);
+    mk_img(dvr_idle_view, LVGL_IMAGE_PATH(dvr/ui_img_dvr_bg.png), 0, 0, 1024, 500);
     lv_obj_t *idle_dock = mk_panel(dvr_idle_view, 0, 500, 1024, 100);
-    mk_img(idle_dock, LVGL_IMAGE_PATH(dvr/dock_bg.png), 0, 0, 1024, 100);
-    idle_tab_sel = mk_img(idle_dock, LVGL_IMAGE_PATH(dvr/dock_selected.png), 0, 0, 512, 100);
+    mk_img(idle_dock, LVGL_IMAGE_PATH(dvr/ui_img_dock_bg.png), 0, 0, 1024, 100);
+    idle_tab_sel = mk_img(idle_dock, LVGL_IMAGE_PATH(dvr/ui_img_dock_selected.png), 0, 0, 512, 100);
     lv_obj_set_size(idle_tab_sel, 512, 100);
-    mk_img(idle_dock, LVGL_IMAGE_PATH(dvr/line.png), 512, 0, 1, 100);
+    mk_img(idle_dock, LVGL_IMAGE_PATH(dvr/ui_img_line.png), 512, 0, 1, 100);
     idle_tab_left  = mk_label(idle_dock, "Front Video", 156, 19, 200, 61, 30);
     idle_tab_right = mk_label(idle_dock, "Rear Video",  668, 19, 200, 61, 30);
     W_HIDE(dvr_idle_view);
 
 
     dvr_list_view = mk_panel(parent, 0, 0, 1024, 600);
-    mk_img(dvr_list_view, LVGL_IMAGE_PATH(dvr/dvr_list_bg.png), 0, 0, 1024, 600);
+    mk_img(dvr_list_view, LVGL_IMAGE_PATH(dvr/ui_img_dvr_list_bg.png), 0, 0, 1024, 600);
 
     lv_obj_t *scroll = mk_panel(dvr_list_view, 44, 10, 936, 480);
     lv_obj_add_flag(scroll, LV_OBJ_FLAG_SCROLLABLE);
@@ -576,12 +576,12 @@ static void build_layout(lv_obj_t *parent)
     for (int i = 0; i < DVR_FILE_ITEM_MAX; i++) {
         int iy = i * 70;
         lv_obj_t *row = mk_panel(scroll, 0, iy, 600, 60);
-        mk_img(row, LVGL_IMAGE_PATH(dvr/list_bg_n.png), 0, 0, 600, 60);
-        file_icon_w[i] = mk_img(row, LVGL_IMAGE_PATH(dvr/list_icon_video_n.png), 10, 0, 60, 60);
+        mk_img(row, LVGL_IMAGE_PATH(dvr/ui_img_list_bg_n.png), 0, 0, 600, 60);
+        file_icon_w[i] = mk_img(row, LVGL_IMAGE_PATH(dvr/ui_img_list_icon_video_n.png), 10, 0, 60, 60);
         file_name_w[i] = mk_label(row, "", 80, 12, 320, 35, 28);
         lv_obj_set_style_text_color(file_name_w[i], lv_color_hex(0x083557), LV_PART_MAIN);
-        file_view_w[i] = mk_img(row, LVGL_IMAGE_PATH(dvr/icon_view_n.png),   390, 0, 100, 60);
-        file_del_w[i]  = mk_img(row, LVGL_IMAGE_PATH(dvr/icon_delete_n.png), 500, 0, 100, 60);
+        file_view_w[i] = mk_img(row, LVGL_IMAGE_PATH(dvr/ui_img_icon_view_n.png),   390, 0, 100, 60);
+        file_del_w[i]  = mk_img(row, LVGL_IMAGE_PATH(dvr/ui_img_icon_delete_n.png), 500, 0, 100, 60);
     }
 
     list_no_sd_label = mk_label(dvr_list_view, "No SD Card", 362, 200, 300, 60, 32);
@@ -589,51 +589,51 @@ static void build_layout(lv_obj_t *parent)
 
 
     lv_obj_t *list_dock = mk_panel(dvr_list_view, 0, 500, 1024, 100);
-    mk_img(list_dock, LVGL_IMAGE_PATH(dvr/dock_bg.png), 0, 0, 1024, 100);
-    list_tab_sel = mk_img(list_dock, LVGL_IMAGE_PATH(dvr/dock_selected.png), 0, 0, 512, 100);
+    mk_img(list_dock, LVGL_IMAGE_PATH(dvr/ui_img_dock_bg.png), 0, 0, 1024, 100);
+    list_tab_sel = mk_img(list_dock, LVGL_IMAGE_PATH(dvr/ui_img_dock_selected.png), 0, 0, 512, 100);
     lv_obj_set_size(list_tab_sel, 512, 100);
-    mk_img(list_dock, LVGL_IMAGE_PATH(dvr/line.png), 512, 0, 1, 100);
+    mk_img(list_dock, LVGL_IMAGE_PATH(dvr/ui_img_line.png), 512, 0, 1, 100);
     tab_label_left  = mk_label(list_dock, "Front Video", 156, 19, 200, 61, 30);
     tab_label_right = mk_label(list_dock, "Rear Video",  668, 19, 200, 61, 30);
     W_HIDE(dvr_list_view);
 
 
     dvr_setting_view = mk_panel(parent, 0, 0, 1024, 600);
-    mk_img(dvr_setting_view, LVGL_IMAGE_PATH(dvr/dvr_list_bg.png), 0, 0, 1024, 600);
+    mk_img(dvr_setting_view, LVGL_IMAGE_PATH(dvr/ui_img_dvr_list_bg.png), 0, 0, 1024, 600);
 
 
     lv_obj_t *r0 = mk_panel(dvr_setting_view, 57, 110, 910, 80);
-    set_row_bg[0] = mk_img(r0, LVGL_IMAGE_PATH(dvr/settings_btn1_n.png), 0, 0, 250, 80);
-    mk_img(r0, LVGL_IMAGE_PATH(dvr/settings_btn3_n.png), 270, 0, 640, 80);
+    set_row_bg[0] = mk_img(r0, LVGL_IMAGE_PATH(dvr/ui_img_settings_btn1_n.png), 0, 0, 250, 80);
+    mk_img(r0, LVGL_IMAGE_PATH(dvr/ui_img_settings_btn3_n.png), 270, 0, 640, 80);
     mk_label(r0, "Version", 65, 18, 120, 43, 30);
     set_ver_text = mk_label(r0, "--", 310, 18, 560, 43, 28);
 
 
     lv_obj_t *r1 = mk_panel(dvr_setting_view, 57, 210, 910, 80);
-    set_row_bg[1] = mk_img(r1, LVGL_IMAGE_PATH(dvr/settings_btn1_n.png), 0, 0, 250, 80);
-    mk_img(r1, LVGL_IMAGE_PATH(dvr/settings_btn2_n.png), 270, 0, 200, 80);
-    mk_img(r1, LVGL_IMAGE_PATH(dvr/settings_btn2_n.png), 490, 0, 200, 80);
-    mk_img(r1, LVGL_IMAGE_PATH(dvr/settings_btn2_n.png), 710, 0, 200, 80);
+    set_row_bg[1] = mk_img(r1, LVGL_IMAGE_PATH(dvr/ui_img_settings_btn1_n.png), 0, 0, 250, 80);
+    mk_img(r1, LVGL_IMAGE_PATH(dvr/ui_img_settings_btn2_n.png), 270, 0, 200, 80);
+    mk_img(r1, LVGL_IMAGE_PATH(dvr/ui_img_settings_btn2_n.png), 490, 0, 200, 80);
+    mk_img(r1, LVGL_IMAGE_PATH(dvr/ui_img_settings_btn2_n.png), 710, 0, 200, 80);
     mk_label(r1, "Loop", 65, 18, 120, 43, 30);
     mk_label(r1, "1 min", 303, 18, 80, 43, 30);
-    set_loop_sel = mk_img(r1, LVGL_IMAGE_PATH(dvr/settings_s.png), 278, 28, 24, 24);
+    set_loop_sel = mk_img(r1, LVGL_IMAGE_PATH(dvr/ui_img_settings_s.png), 278, 28, 24, 24);
     mk_label(r1, "2 min", 523, 18, 80, 43, 30);
     mk_label(r1, "3 min", 743, 18, 80, 43, 30);
 
 
     lv_obj_t *r2 = mk_panel(dvr_setting_view, 57, 310, 910, 80);
-    set_row_bg[2] = mk_img(r2, LVGL_IMAGE_PATH(dvr/settings_btn1_n.png), 0, 0, 250, 80);
-    mk_img(r2, LVGL_IMAGE_PATH(dvr/settings_btn2w_n.png), 270, 0, 310, 80);
-    mk_img(r2, LVGL_IMAGE_PATH(dvr/settings_btn2w_n.png), 600, 0, 310, 80);
+    set_row_bg[2] = mk_img(r2, LVGL_IMAGE_PATH(dvr/ui_img_settings_btn1_n.png), 0, 0, 250, 80);
+    mk_img(r2, LVGL_IMAGE_PATH(dvr/ui_img_settings_btn2w_n.png), 270, 0, 310, 80);
+    mk_img(r2, LVGL_IMAGE_PATH(dvr/ui_img_settings_btn2w_n.png), 600, 0, 310, 80);
     mk_label(r2, "Format", 80, 18, 90, 43, 30);
     mk_label(r2, "Quick Format", 340, 18, 170, 43, 28);
-    set_fmt_sel = mk_img(r2, LVGL_IMAGE_PATH(dvr/settings_s.png), 285, 28, 24, 24);
+    set_fmt_sel = mk_img(r2, LVGL_IMAGE_PATH(dvr/ui_img_settings_s.png), 285, 28, 24, 24);
     mk_label(r2, "Factory Reset", 670, 18, 170, 43, 28);
 
 
     lv_obj_t *r3 = mk_panel(dvr_setting_view, 57, 410, 910, 80);
-    set_row_bg[3] = mk_img(r3, LVGL_IMAGE_PATH(dvr/settings_btn1_n.png), 0, 0, 250, 80);
-    mk_img(r3, LVGL_IMAGE_PATH(dvr/settings_btn3_n.png), 270, 0, 640, 80);
+    set_row_bg[3] = mk_img(r3, LVGL_IMAGE_PATH(dvr/ui_img_settings_btn1_n.png), 0, 0, 250, 80);
+    mk_img(r3, LVGL_IMAGE_PATH(dvr/ui_img_settings_btn3_n.png), 270, 0, 640, 80);
     mk_label(r3, "SD Card", 55, 18, 140, 43, 30);
 
 
@@ -652,13 +652,13 @@ static void build_layout(lv_obj_t *parent)
 
 
     dvr_popup_view = mk_panel(parent, 262, 165, 500, 270);
-    mk_img(dvr_popup_view, LVGL_IMAGE_PATH(dvr/pop_up_bg.png), 0, 0, 500, 270);
+    mk_img(dvr_popup_view, LVGL_IMAGE_PATH(dvr/ui_img_pop_up_bg.png), 0, 0, 500, 270);
     popup_title = mk_label(dvr_popup_view, "Confirm?", 170, 60, 160, 46, 33);
-    popup_loading_w = mk_img(dvr_popup_view, LVGL_IMAGE_PATH(dvr/dvr_loading_0.png), 210, 90, 80, 80);
+    popup_loading_w = mk_img(dvr_popup_view, LVGL_IMAGE_PATH(dvr/ui_img_dvr_loading_0.png), 210, 90, 80, 80);
     W_HIDE(popup_loading_w);
-    popup_confirm_bg  = mk_img(dvr_popup_view, LVGL_IMAGE_PATH(dvr/pop_up_btn_n.png), 50,  170, 180, 60);
+    popup_confirm_bg  = mk_img(dvr_popup_view, LVGL_IMAGE_PATH(dvr/ui_img_pop_up_btn_n.png), 50,  170, 180, 60);
     popup_confirm_lbl = mk_label(dvr_popup_view, "OK",     112, 179, 56, 41, 30);
-    popup_cancel_bg   = mk_img(dvr_popup_view, LVGL_IMAGE_PATH(dvr/pop_up_btn_n.png), 270, 170, 180, 60);
+    popup_cancel_bg   = mk_img(dvr_popup_view, LVGL_IMAGE_PATH(dvr/ui_img_pop_up_btn_n.png), 270, 170, 180, 60);
     popup_cancel_lbl  = mk_label(dvr_popup_view, "Cancel", 332, 179, 56, 41, 30);
     W_HIDE(dvr_popup_view);
 }
