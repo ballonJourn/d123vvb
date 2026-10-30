@@ -330,9 +330,21 @@ static void loading_fill_settings(void)
 static void on_loading_poll_timer(lv_timer_t *t)
 {
     (void)t;
-    loading_anim_frame = (loading_anim_frame + 1) & 7;
-    if (popup_loading_w)
-        lv_image_set_src(popup_loading_w, loading_imgs[loading_anim_frame]);
+    /* This timer is only meant to animate the loading spinner while the
+     * user is actually looking at it (cur_sub == DVR_SUB_LOADING). It was
+     * previously ungated, so it kept decoding a new PNG frame every
+     * LOADING_POLL_INTERVAL_MS even after the user navigated away (e.g.
+     * back to the live DVR_SUB_MAIN preview) — colliding with the VE
+     * hardware's MJPEG decode of the live camera feed and producing
+     * "lv_mpp_dec_open: Invalid status" / "Failed to open image" errors.
+     * The TF-capacity polling below must keep running regardless (it is
+     * what detects the SD card and eventually gives up), only the image
+     * decode is skipped when the spinner isn't the thing on screen. */
+    if (cur_sub == DVR_SUB_LOADING) {
+        loading_anim_frame = (loading_anim_frame + 1) & 7;
+        if (popup_loading_w)
+            lv_image_set_src(popup_loading_w, loading_imgs[loading_anim_frame]);
+    }
 
     int tf_ok = dvr_api_get_tf_capacity(NULL, NULL);
     if (tf_ok || ++loading_poll_retries >= LOADING_POLL_MAX_RETRIES) {
