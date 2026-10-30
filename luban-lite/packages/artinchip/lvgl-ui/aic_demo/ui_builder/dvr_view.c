@@ -1,4 +1,5 @@
 #include "dvr_view.h"
+#include <time.h>        /* time()/localtime_r()/struct tm, for the Sync Time setting row */
 #include "aic_ui.h"      /* LVGL_IMAGE_PATH() -> files under /rodata/lvgl_data/image/ */
 #include "mw_dvr.h"      /* DVR backend API + BD_CTRL_* (ui_builder/dvr_page.c dir is in the
                           * project-global CPPPATH, so this resolves to
@@ -34,6 +35,12 @@ static lv_obj_t *file_name_w[DVR_FILE_ITEM_MAX]  = {0};
 static lv_obj_t *file_icon_w[DVR_FILE_ITEM_MAX]  = {0};
 static lv_obj_t *file_view_w[DVR_FILE_ITEM_MAX]  = {0};
 static lv_obj_t *file_del_w[DVR_FILE_ITEM_MAX]   = {0};
+/* Lock/unlock button per row. No dedicated lock icon exists among the
+ * ported assets, so the settings gear icon is reused as a stand-in and
+ * a small label underneath (file_lock_lbl_w) spells out "Lock"/"Unlock"
+ * so the action is still unambiguous. */
+static lv_obj_t *file_lock_w[DVR_FILE_ITEM_MAX]     = {0};
+static lv_obj_t *file_lock_lbl_w[DVR_FILE_ITEM_MAX] = {0};
 
 static lv_obj_t *list_tab_sel    = NULL;
 static lv_obj_t *tab_label_left  = NULL;
@@ -43,6 +50,10 @@ static lv_obj_t *set_ver_text    = NULL;
 static lv_obj_t *set_loop_sel    = NULL;
 static lv_obj_t *storage_bar     = NULL;
 static lv_obj_t *storage_text    = NULL;
+static lv_obj_t *set_mic_sel     = NULL;  /* On/Off selector dot, mirrors set_fmt_sel */
+static lv_obj_t *set_stamp_sel   = NULL;
+static lv_obj_t *set_res_sel     = NULL;  /* 1080P/720P selector dot */
+static lv_obj_t *set_time_text   = NULL;  /* "Sync Time" row's status label */
 static lv_obj_t *popup_loading_w = NULL;
 static lv_obj_t *list_no_sd_label= NULL;
 
@@ -72,6 +83,19 @@ static int set_fmt_focus = DVR_FMT_SD_FORMAT;
 static int list_count    = 0;
 static int list_offset   = 0;
 
+/* Mic/Stamp/Resolution are simple toggles applied immediately on SET
+ * (no DVR_SUB_SET_EDIT excursion needed, unlike LOOP/FORMAT). mic_val is
+ * initialised from the device's real GET_STS reply (dvr_get_mic_status())
+ * the first time the Settings page is shown. Stamp and Resolution have no
+ * query command in this protocol (BD_CTRL_GET_STS doesn't report them,
+ * and there's no dedicated "get current resolution/stamp" command) — the
+ * DVR can't actually be asked what it's currently set to, so these two
+ * start from an assumed default and only reflect what this session has
+ * set, not necessarily the device's true last-set value. */
+static int mic_val   = 1;  /* 0=off, 1=on (assumed default; reconciled from GET_STS at Settings-open) */
+static int stamp_val = 1;  /* 0=off, 1=on (assumed default — no query exists, see note above) */
+static int res_val   = DVR_RES_1080P;  /* assumed default — no query exists, see note above */
+
 typedef enum { POP_FILE_DEL=0, POP_FORMAT=1, POP_NO_SD=2, POP_FACTORY_RST=3 } pop_src_e;
 static pop_src_e popup_src = POP_FILE_DEL;
 
@@ -79,6 +103,7 @@ static int pb_paused = 0, pb_idx = 0, pb_mode = 0;
 
 #define LIST_ACT_PLAY    0
 #define LIST_ACT_DELETE  1
+#define LIST_ACT_LOCK    2
 static int list_act_focus = LIST_ACT_PLAY;
 
 static int list_fetch_pending = 0;
@@ -95,6 +120,11 @@ static int loading_anim_frame   = 0;
 
 static lv_timer_t *del_poll_timer = NULL;
 #define DEL_POLL_INTERVAL_MS  200
+/* 25 * 200ms = 5s round-trip budget before giving up on the DEL_FILE ACK
+ * and treating the delete as failed/unknown. This constant existed
+ * before but was never actually read anywhere (on_del_poll_timer() used
+ * to wait a hardcoded 3-4 ticks regardless of it); it is now the real
+ * timeout used by on_del_poll_timer()'s dvr_api_is_del_ack() polling. */
 #define DEL_POLL_MAX_RETRIES  25
 static int del_poll_retries = 0;
 
@@ -172,7 +202,8 @@ static void hl_dock(int i)
 static void hl_cam(int i)
 {
     cam_focus = i;
-    if (dvr_cam_tab_sel) lv_obj_set_pos(dvr_cam_tab_sel, i * 341, 0);
+    /* 4 columns now (Front/Rear/Snapshot/SOS), 1024/4 = 256px each. */
+    if (dvr_cam_tab_sel) lv_obj_set_pos(dvr_cam_tab_sel, i * 256, 0);
 }
 
 static void hl_list(int i)
@@ -199,6 +230,9 @@ static void hl_list_act(int act)
         if (file_del_w[i])
             lv_image_set_src(file_del_w[i],
                 (act == LIST_ACT_DELETE) ? LVGL_IMAGE_PATH(dvr/ui_img_icon_delete_p.png) : LVGL_IMAGE_PATH(dvr/ui_img_icon_delete_n.png));
+        if (file_lock_w[i])
+            lv_image_set_src(file_lock_w[i],
+                (act == LIST_ACT_LOCK) ? LVGL_IMAGE_PATH(dvr/ui_img_icon_settings_p.png) : LVGL_IMAGE_PATH(dvr/ui_img_icon_settings_n.png));
     }
 }
 
@@ -246,6 +280,24 @@ static void hl_fmt(int f)
 {
     if (set_fmt_sel) lv_obj_set_pos(set_fmt_sel, (f == 0) ? 285 : 615, 28);
     set_fmt_focus = f;
+}
+/* hl_mic/hl_stamp/hl_res: same 2-way selector-dot pattern as hl_fmt above
+ * (columns at x=285 and x=615, matching rows r4-r6's two option labels at
+ * 340/670 — same geometry the Format row r2 uses). */
+static void hl_mic(int v)
+{
+    if (set_mic_sel) lv_obj_set_pos(set_mic_sel, (v == 1) ? 285 : 615, 28);
+    mic_val = v;
+}
+static void hl_stamp(int v)
+{
+    if (set_stamp_sel) lv_obj_set_pos(set_stamp_sel, (v == 1) ? 285 : 615, 28);
+    stamp_val = v;
+}
+static void hl_res(int v)
+{
+    if (set_res_sel) lv_obj_set_pos(set_res_sel, (v == DVR_RES_1080P) ? 285 : 615, 28);
+    res_val = v;
 }
 
 static void hl_loop(int v)
@@ -355,6 +407,9 @@ static void on_loading_poll_timer(lv_timer_t *t)
         hl_set(DVR_SET_VERSION);
         hl_loop(set_loop_val);
         hl_fmt(set_fmt_focus);
+        hl_mic(dvr_get_mic_status());
+        hl_stamp(stamp_val);
+        hl_res(res_val);
         printf("DVR: loading done (tf=%d retries=%d) -> settings\n", tf_ok, loading_poll_retries);
     }
 }
@@ -367,6 +422,12 @@ static void enter_settings(void)
         show_sub(DVR_SUB_SETTING);
         set_focus = DVR_SET_VERSION;
         hl_set(DVR_SET_VERSION); hl_loop(set_loop_val); hl_fmt(set_fmt_focus);
+        /* Mic reflects the device's real GET_STS reply, re-read every time
+         * Settings is (re)entered. Stamp/Resolution have no query command
+         * in this protocol (see the comment on their static vars) so they
+         * just keep showing whatever this session last set (or the
+         * assumed default if never changed). */
+        hl_mic(dvr_get_mic_status()); hl_stamp(stamp_val); hl_res(res_val);
         printf("DVR: enter settings (cache hit)\n");
         return;
     }
@@ -414,15 +475,40 @@ static void on_del_poll_timer(lv_timer_t *t)
         printf("DVR: del verify aborted (left list)\n");
         return;
     }
-    del_poll_retries++;
-    if (del_poll_retries <= 3) return;
-    if (del_poll_retries == 4) {
-        printf("DVR: del verify: requesting fresh list\n");
+
+    /* Check the device's actual DEL_FILE acknowledgement each tick,
+     * instead of just waiting out a fixed number of ticks and hoping —
+     * dvr_api_is_del_ack()/dvr_api_clear_del_ack() exist for exactly
+     * this and were previously never read anywhere. */
+    if (dvr_api_is_del_ack()) {
+        dvr_api_clear_del_ack();
+        del_poll_stop();
+        printf("DVR: del ACK received (fi=%d) — refreshing list\n", del_pending_fi);
+        del_pending_fi = -1;
+        /* Refetch even on confirmed success: deleting a file shifts every
+         * later file's index on the device, so the optimistic single-row
+         * removal above is only a same-frame visual placeholder, not a
+         * correct re-index of the rows after it. */
         dvr_file_list_clear();
         dvr_request_file_list();
         return;
     }
-    del_poll_stop(); del_pending_fi = -1;
+
+    del_poll_retries++;
+    if (del_poll_retries < DEL_POLL_MAX_RETRIES) return;
+
+    /* Timed out with no ACK: the delete may genuinely have failed (card
+     * error, file locked, etc.) rather than just being slow. Refetch the
+     * real list either way so the UI reconciles with whatever actually
+     * happened — if the delete DID fail, the optimistically-removed row
+     * will visibly reappear, which is the only feedback this protocol
+     * can give without a distinct "delete failed" reply to key off. */
+    printf("DVR: del ACK timeout after %d retries (fi=%d) — refreshing list to reconcile\n",
+           del_poll_retries, del_pending_fi);
+    del_poll_stop();
+    del_pending_fi = -1;
+    dvr_file_list_clear();
+    dvr_request_file_list();
 }
 
 static void del_then_refresh(int fi)
@@ -556,14 +642,21 @@ static void build_layout(lv_obj_t *parent)
     dock_btn[3] = mk_img(dvr_dock_bar, LVGL_IMAGE_PATH(dvr/ui_img_icon_settings_n.png), 816, 0, 160, 100);
 
 
+    /* 4 columns (Front/Rear/Snapshot/SOS), 256px each — widened from the
+     * original 3-column (341px) layout to fit the new SOS item. No
+     * dedicated SOS icon asset exists among the ported images, so it is
+     * a plain text label like Front/Rear rather than an icon like
+     * Snapshot's camera icon. */
     dvr_cam_dock = mk_panel(dvr_main_view, 0, 500, 1024, 100);
     mk_img(dvr_cam_dock, LVGL_IMAGE_PATH(dvr/ui_img_dock_bg.png), 0, 0, 1024, 100);
-    dvr_cam_tab_sel = mk_img(dvr_cam_dock, LVGL_IMAGE_PATH(dvr/ui_img_dock_selected.png), 0, 0, 341, 100);
-    mk_img(dvr_cam_dock, LVGL_IMAGE_PATH(dvr/ui_img_line.png), 341, 0, 1, 100);
-    mk_img(dvr_cam_dock, LVGL_IMAGE_PATH(dvr/ui_img_line.png), 682, 0, 1, 100);
-    mk_label(dvr_cam_dock, "Front",  86, 19, 168, 61, 30);
-    mk_label(dvr_cam_dock, "Rear",  427, 19, 168, 61, 30);
-    mk_img(dvr_cam_dock, LVGL_IMAGE_PATH(dvr/ui_img_icon_photo_n.png), 812, 10, 80, 80);
+    dvr_cam_tab_sel = mk_img(dvr_cam_dock, LVGL_IMAGE_PATH(dvr/ui_img_dock_selected.png), 0, 0, 256, 100);
+    mk_img(dvr_cam_dock, LVGL_IMAGE_PATH(dvr/ui_img_line.png), 256, 0, 1, 100);
+    mk_img(dvr_cam_dock, LVGL_IMAGE_PATH(dvr/ui_img_line.png), 512, 0, 1, 100);
+    mk_img(dvr_cam_dock, LVGL_IMAGE_PATH(dvr/ui_img_line.png), 768, 0, 1, 100);
+    mk_label(dvr_cam_dock, "Front",  44, 19, 168, 61, 30);
+    mk_label(dvr_cam_dock, "Rear",  300, 19, 168, 61, 30);
+    mk_img(dvr_cam_dock, LVGL_IMAGE_PATH(dvr/ui_img_icon_photo_n.png), 588, 10, 80, 80);
+    mk_label(dvr_cam_dock, "SOS",   812, 19, 168, 61, 30);
     W_HIDE(dvr_cam_dock);
 
 
@@ -587,13 +680,26 @@ static void build_layout(lv_obj_t *parent)
 
     for (int i = 0; i < DVR_FILE_ITEM_MAX; i++) {
         int iy = i * 70;
-        lv_obj_t *row = mk_panel(scroll, 0, iy, 600, 60);
+        /* Row widened 600 -> 700 to fit the new 3rd (lock/unlock) button;
+         * the scroll container is 936px wide, so there's ample headroom. */
+        lv_obj_t *row = mk_panel(scroll, 0, iy, 700, 60);
         mk_img(row, LVGL_IMAGE_PATH(dvr/ui_img_list_bg_n.png), 0, 0, 600, 60);
+        mk_img(row, LVGL_IMAGE_PATH(dvr/ui_img_list_bg_n.png), 600, 0, 100, 60);
         file_icon_w[i] = mk_img(row, LVGL_IMAGE_PATH(dvr/ui_img_list_icon_video_n.png), 10, 0, 60, 60);
         file_name_w[i] = mk_label(row, "", 80, 12, 320, 35, 28);
         lv_obj_set_style_text_color(file_name_w[i], lv_color_hex(0x083557), LV_PART_MAIN);
         file_view_w[i] = mk_img(row, LVGL_IMAGE_PATH(dvr/ui_img_icon_view_n.png),   390, 0, 100, 60);
         file_del_w[i]  = mk_img(row, LVGL_IMAGE_PATH(dvr/ui_img_icon_delete_n.png), 500, 0, 100, 60);
+        /* No dedicated lock icon asset exists; reuse the settings gear
+         * icon and spell out Lock/Unlock in a small label underneath so
+         * the action stays unambiguous despite the placeholder icon. */
+        file_lock_w[i]     = mk_img(row, LVGL_IMAGE_PATH(dvr/ui_img_icon_settings_n.png), 610, 2, 36, 36);
+        file_lock_lbl_w[i] = mk_label(row, "Lock", 600, 38, 100, 20, 14);
+        /* mk_label defaults to white text; against this light row
+         * background that's unreadable, same reason file_name_w above
+         * overrides it to a dark color. */
+        lv_obj_set_style_text_color(file_lock_lbl_w[i], lv_color_hex(0x083557), LV_PART_MAIN);
+        lv_obj_set_style_text_align(file_lock_lbl_w[i], LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
     }
 
     list_no_sd_label = mk_label(dvr_list_view, "No SD Card", 362, 200, 300, 60, 32);
@@ -611,6 +717,19 @@ static void build_layout(lv_obj_t *parent)
 
 
     dvr_setting_view = mk_panel(parent, 0, 0, 1024, 600);
+    /* 8 rows now (was 4): Version/Loop/Format/SD Card originally fit
+     * exactly in the 600px-tall screen; Mic/Stamp/Resolution/Sync Time
+     * are appended below and reached by scrolling the view down as the
+     * UP/DOWN-driven focus (hl_set()) moves onto them. */
+    lv_obj_add_flag(dvr_setting_view, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(dvr_setting_view, LV_DIR_VER);
+    /* ui_img_dvr_list_bg.png is a flat 0xC1DBFD fill (sampled from its
+     * own pixel data), 1024x600. Set that same color on the panel itself
+     * first so the area below the original 600px (rows 4-7, reached by
+     * scrolling) is seamlessly the same color, then lay the actual PNG
+     * over the top 600px for row 0-3's unchanged look. */
+    lv_obj_set_style_bg_color(dvr_setting_view, lv_color_hex(0xC1DBFD), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(dvr_setting_view, LV_OPA_COVER, LV_PART_MAIN);
     mk_img(dvr_setting_view, LVGL_IMAGE_PATH(dvr/ui_img_dvr_list_bg.png), 0, 0, 1024, 600);
 
 
@@ -659,6 +778,47 @@ static void build_layout(lv_obj_t *parent)
     lv_obj_set_style_bg_opa(storage_bar, LV_OPA_COVER, LV_PART_INDICATOR);
 
     storage_text = mk_label(r3, "--/--", 683, 19, 200, 43, 28);
+
+
+    /* --- rows below are reached by scrolling (see dvr_setting_view's
+     * SCROLLABLE flag above); same 100px-row-pitch pattern as r0-r3. --- */
+
+    lv_obj_t *r4 = mk_panel(dvr_setting_view, 57, 510, 910, 80);
+    set_row_bg[DVR_SET_MIC] = mk_img(r4, LVGL_IMAGE_PATH(dvr/ui_img_settings_btn1_n.png), 0, 0, 250, 80);
+    mk_img(r4, LVGL_IMAGE_PATH(dvr/ui_img_settings_btn2w_n.png), 270, 0, 310, 80);
+    mk_img(r4, LVGL_IMAGE_PATH(dvr/ui_img_settings_btn2w_n.png), 600, 0, 310, 80);
+    mk_label(r4, "Mic", 80, 18, 90, 43, 30);
+    mk_label(r4, "On",  340, 18, 170, 43, 28);
+    set_mic_sel = mk_img(r4, LVGL_IMAGE_PATH(dvr/ui_img_settings_s.png), 285, 28, 24, 24);
+    mk_label(r4, "Off", 670, 18, 170, 43, 28);
+
+    lv_obj_t *r5 = mk_panel(dvr_setting_view, 57, 610, 910, 80);
+    set_row_bg[DVR_SET_STAMP] = mk_img(r5, LVGL_IMAGE_PATH(dvr/ui_img_settings_btn1_n.png), 0, 0, 250, 80);
+    mk_img(r5, LVGL_IMAGE_PATH(dvr/ui_img_settings_btn2w_n.png), 270, 0, 310, 80);
+    mk_img(r5, LVGL_IMAGE_PATH(dvr/ui_img_settings_btn2w_n.png), 600, 0, 310, 80);
+    mk_label(r5, "Stamp", 80, 18, 90, 43, 30);
+    mk_label(r5, "On",    340, 18, 170, 43, 28);
+    set_stamp_sel = mk_img(r5, LVGL_IMAGE_PATH(dvr/ui_img_settings_s.png), 285, 28, 24, 24);
+    mk_label(r5, "Off",   670, 18, 170, 43, 28);
+
+    lv_obj_t *r6 = mk_panel(dvr_setting_view, 57, 710, 910, 80);
+    set_row_bg[DVR_SET_RES] = mk_img(r6, LVGL_IMAGE_PATH(dvr/ui_img_settings_btn1_n.png), 0, 0, 250, 80);
+    mk_img(r6, LVGL_IMAGE_PATH(dvr/ui_img_settings_btn2w_n.png), 270, 0, 310, 80);
+    mk_img(r6, LVGL_IMAGE_PATH(dvr/ui_img_settings_btn2w_n.png), 600, 0, 310, 80);
+    mk_label(r6, "Resolution", 80, 18, 90, 43, 28);
+    mk_label(r6, "1080P", 340, 18, 170, 43, 28);
+    set_res_sel = mk_img(r6, LVGL_IMAGE_PATH(dvr/ui_img_settings_s.png), 285, 28, 24, 24);
+    mk_label(r6, "720P",  670, 18, 170, 43, 28);
+
+    /* Sync Time: a single fire-and-forget action (like Format/Factory
+     * Reset in spirit, but non-destructive so no confirmation popup),
+     * not a 2-way toggle, so it uses the wide single-button style
+     * (settings_btn3_n) like Version/SD Card's info rows. */
+    lv_obj_t *r7 = mk_panel(dvr_setting_view, 57, 810, 910, 80);
+    set_row_bg[DVR_SET_TIME] = mk_img(r7, LVGL_IMAGE_PATH(dvr/ui_img_settings_btn1_n.png), 0, 0, 250, 80);
+    mk_img(r7, LVGL_IMAGE_PATH(dvr/ui_img_settings_btn3_n.png), 270, 0, 640, 80);
+    mk_label(r7, "Sync Time", 65, 18, 170, 43, 28);
+    set_time_text = mk_label(r7, "Press SET to sync", 310, 18, 560, 43, 24);
 
     W_HIDE(dvr_setting_view);
 
@@ -737,6 +897,10 @@ void dvr_page_deal_key_set(void)
             if (!dvr_get_sd_status()) { show_no_sd_popup(DVR_SUB_CAM_SW); }
             else { dvr_api_snap(); printf("DVR: snap!\n"); }
             break;
+        case DVR_CAM_SOS:
+            if (!dvr_get_sd_status()) { show_no_sd_popup(DVR_SUB_CAM_SW); }
+            else { dvr_api_sos(); printf("DVR: SOS!\n"); }
+            break;
         default: break;
         } break;
 
@@ -765,6 +929,39 @@ void dvr_page_deal_key_set(void)
             dvr_api_pb_start((uint8_t)pb_mode, pb_file_no);
             show_sub(DVR_SUB_PLAYBACK);
             printf("DVR: pb start mode=%d pos=%d file_no=%d\n", pb_mode, fi, pb_file_no);
+        } else if (list_act_focus == LIST_ACT_LOCK) {
+            /* dvr_api_lock_file()/unlock_file() (BD_CTRL_LOCK_FILE/UNLOCK_FILE)
+             * send a plain file index with none of DELETE's mode/tab bits
+             * (dvr_lock_file() in mw_dvr.c sends the index as-is) — it is
+             * not confirmed whether the device scopes that index to
+             * "whichever list was last fetched via GET_LIST" the same way
+             * this UI assumes, since there is no lock-state query to
+             * verify against. Toggle is decided from the filename's own
+             * MOVI/LOCK prefix, which mw_dvr.c's dvr_filelist_parser()
+             * already derives from the device's real per-file lock bit. */
+            char fn[DVR_NAME_MAX];
+            uint16_t file_no = (uint16_t)fi;
+            uint8_t currently_locked = 0;
+            if (get_fname(fi, fn, sizeof(fn)) && strlen(fn) >= 8) {
+                file_no = (uint16_t)((fn[4]-'0')*1000 + (fn[5]-'0')*100
+                                     + (fn[6]-'0')*10 + (fn[7]-'0'));
+                currently_locked = (strncmp(fn, "LOCK", 4) == 0);
+            }
+            if (currently_locked) {
+                dvr_api_unlock_file(file_no);
+                printf("DVR: unlock file_no=%d (fi=%d)\n", file_no, fi);
+            } else {
+                dvr_api_lock_file(file_no);
+                printf("DVR: lock file_no=%d (fi=%d)\n", file_no, fi);
+            }
+            /* No lock-state ACK exists in this protocol (unlike DEL_FILE's
+             * dvr_api_is_del_ack()) — the only way to see whether it took
+             * is to refetch the list, same mechanism DELETE's background
+             * verify already uses. */
+            show_sub(DVR_SUB_LIST);
+            dvr_file_list_clear(); dvr_request_file_list();
+            hl_list(list_focus); hl_tab(list_tab);
+            printf("DVR: lock toggle sent, refreshing list to verify\n");
         } else {
             popup_src = POP_FILE_DEL; popup_focus = 1;
             show_sub(DVR_SUB_POPUP); hl_popup(1);
@@ -778,6 +975,44 @@ void dvr_page_deal_key_set(void)
         case DVR_SET_LOOP:   set_edit_val = set_loop_val; hl_loop(set_edit_val); show_sub(DVR_SUB_SET_EDIT); break;
         case DVR_SET_FORMAT: set_fmt_focus = DVR_FMT_SD_FORMAT; hl_fmt(set_fmt_focus); show_sub(DVR_SUB_SET_EDIT); break;
         case DVR_SET_SD_CARD: break;
+        case DVR_SET_MIC: {
+            int v = mic_val ? 0 : 1;
+            hl_mic(v);
+            dvr_api_set_mic((uint8_t)v);
+            printf("DVR: mic -> %s\n", v ? "on" : "off");
+            break;
+        }
+        case DVR_SET_STAMP: {
+            int v = stamp_val ? 0 : 1;
+            hl_stamp(v);
+            dvr_api_set_stamp((uint8_t)v);
+            printf("DVR: stamp -> %s\n", v ? "on" : "off");
+            break;
+        }
+        case DVR_SET_RES: {
+            int v = (res_val == DVR_RES_1080P) ? DVR_RES_720P : DVR_RES_1080P;
+            hl_res(v);
+            dvr_api_set_res((uint8_t)v);
+            printf("DVR: resolution -> %s\n", v == DVR_RES_1080P ? "1080P" : "720P");
+            break;
+        }
+        case DVR_SET_TIME: {
+            /* Push the host's own wall-clock time to the DVR. This needs
+             * the host's RTC to already be correctly set (e.g. via NTP or
+             * a prior manual set) — this call has no way to verify that,
+             * it just forwards whatever time() currently reports. */
+            time_t now = time(NULL);
+            struct tm tmv;
+            localtime_r(&now, &tmv);
+            dvr_api_set_time((uint16_t)(tmv.tm_year + 1900), (uint8_t)(tmv.tm_mon + 1),
+                              (uint8_t)tmv.tm_mday, (uint8_t)tmv.tm_hour,
+                              (uint8_t)tmv.tm_min, (uint8_t)tmv.tm_sec);
+            if (set_time_text) lv_label_set_text(set_time_text, "Synced");
+            printf("DVR: time sync sent (%04d-%02d-%02d %02d:%02d:%02d)\n",
+                   tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday,
+                   tmv.tm_hour, tmv.tm_min, tmv.tm_sec);
+            break;
+        }
         default: break;
         } break;
 
@@ -928,9 +1163,11 @@ void dvr_page_deal_key_up(void)
         else if (set_focus == DVR_SET_FORMAT) { set_fmt_focus = set_fmt_focus ? 0 : 1; hl_fmt(set_fmt_focus); }
         break;
     case DVR_SUB_POPUP:    popup_focus = 0; hl_popup(0); break;
-    case DVR_SUB_LIST_ACT:
-        if (list_act_focus != LIST_ACT_PLAY) { list_act_focus = LIST_ACT_PLAY; hl_list_act(LIST_ACT_PLAY); }
+    case DVR_SUB_LIST_ACT: {
+        int a = (list_act_focus > 0) ? list_act_focus - 1 : LIST_ACT_LOCK;
+        hl_list_act(a);
         break;
+    }
     case DVR_SUB_LIST_SEL:
         if (list_tab > 0) { list_tab--; hl_idle_tab(list_tab); } break;
     case DVR_SUB_LOADING: break;
@@ -960,9 +1197,11 @@ void dvr_page_deal_key_down(void)
         else if (set_focus == DVR_SET_FORMAT) { set_fmt_focus = set_fmt_focus ? 0 : 1; hl_fmt(set_fmt_focus); }
         break;
     case DVR_SUB_POPUP:    popup_focus = 1; hl_popup(1); break;
-    case DVR_SUB_LIST_ACT:
-        if (list_act_focus != LIST_ACT_DELETE) { list_act_focus = LIST_ACT_DELETE; hl_list_act(LIST_ACT_DELETE); }
+    case DVR_SUB_LIST_ACT: {
+        int a = (list_act_focus < LIST_ACT_LOCK) ? list_act_focus + 1 : LIST_ACT_PLAY;
+        hl_list_act(a);
         break;
+    }
     case DVR_SUB_LIST_SEL:
         if (list_tab < DVR_TAB_MAX - 1) { list_tab++; hl_idle_tab(list_tab); } break;
     case DVR_SUB_LOADING: break;

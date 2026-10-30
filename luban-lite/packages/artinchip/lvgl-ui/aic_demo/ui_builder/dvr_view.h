@@ -34,6 +34,7 @@ typedef enum dvr_cam_item {
     DVR_CAM_FRONT    = 0,
     DVR_CAM_REAR     = 1,
     DVR_CAM_SNAPSHOT = 2,
+    DVR_CAM_SOS      = 3,
     DVR_CAM_ITEM_MAX ,
 } dvr_cam_item_e;
 
@@ -48,11 +49,19 @@ typedef enum dvr_setting_row {
     DVR_SET_LOOP    = 1,
     DVR_SET_FORMAT  = 2,
     DVR_SET_SD_CARD = 3,
+    DVR_SET_MIC     = 4,
+    DVR_SET_STAMP   = 5,
+    DVR_SET_RES     = 6,
+    DVR_SET_TIME    = 7,
     DVR_SET_ROW_MAX ,
 } dvr_setting_row_e;
 
 #define DVR_FMT_SD_FORMAT    0
 #define DVR_FMT_FACTORY_RST  1
+
+/* DVR_SET_RES values (match dvr_api_set_res()'s own 0/1 convention) */
+#define DVR_RES_1080P  0
+#define DVR_RES_720P   1
 
 #define DVR_FILE_ITEM_MAX  6
 
