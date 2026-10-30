@@ -4,6 +4,12 @@
                           * project-global CPPPATH, so this resolves to
                           * application/rt-thread/helloworld/mw/dvr/mw_dvr.h) */
 
+/* mw_dvr.c defines DVR_NAME_MAX = 16 for its own dvr_api_get_*_list_*
+ * fixed-width name buffers, but only inside mw_dvr.c itself — it is not
+ * part of mw_dvr.h's public interface, so it has to be mirrored here.
+ * Must match mw_dvr.c's #define exactly (incl. trailing NUL). */
+#define DVR_NAME_MAX  16
+
 static void show_sub(dvr_sub_page_e sub);
 static void del_poll_stop(void);
 static void dvr_request_file_list(void);
