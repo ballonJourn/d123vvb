@@ -42,6 +42,17 @@ static volatile uint32_t dvr_tf_total_kib = 0;
 static volatile uint32_t dvr_tf_free_kib  = 0;
 static volatile uint8_t  dvr_tf_capacity_valid = 0;
 
+// Total-time-of-clip cache: BD_CTRL_TOTAL_TIME's reply only carries the
+// index it was answering (pctrl->cmd_par) and the length (pctrl->data_len);
+// per dvr_get_total_time()'s call site, data_len itself IS the time in
+// seconds for that index (not a byte count — see BD_CTRL_TOTAL_TIME's
+// printf below, which already reported it this way before this cache
+// existed). Cache both so dvr_api_get_total_time_result() can tell the
+// caller whether the cached value is actually for the index it asked about.
+static volatile uint16_t dvr_total_time_index = 0;
+static volatile uint32_t dvr_total_time_sec   = 0;
+static volatile uint8_t  dvr_total_time_valid = 0;
+
 // DEL_FILE acknowledgement flag: set to 1 when DVR replies to a DEL_FILE command.
 // Cleared by dvr_api_clear_del_ack() before sending DEL, polled by UI after.
 static volatile uint8_t  dvr_del_ack_received = 0;
@@ -693,6 +704,9 @@ static void dvr_recv_cmd_process(st_bd_ctrl_if_t *pctrl)
             printf("DVR: UNLOCK_FILE received, index=%d, status=%d\n", pctrl->cmd_par, pctrl->data_len);
             break;
         case BD_CTRL_TOTAL_TIME:
+            dvr_total_time_index = pctrl->cmd_par;
+            dvr_total_time_sec   = (uint32_t)pctrl->data_len;
+            dvr_total_time_valid = 1;
             printf("DVR: TOTAL_TIME received, index=%d, time=%d sec\n", pctrl->cmd_par, pctrl->data_len);
             break;
         case BD_CTRL_GET_TF_CAPACITY:
@@ -1827,6 +1841,23 @@ void dvr_api_unlock_file(uint16_t index)
 void dvr_api_get_total_time(uint16_t index)
 {
     dvr_get_total_time(index);
+}
+
+// DVR control API - Read the most recently received TOTAL_TIME reply.
+//   index:        the file index to check the cached reply against.
+//   seconds_out:  out-param (may be NULL); set to the cached seconds on match.
+//   Returns 1 if a reply for THIS index is cached (seconds_out is valid),
+//   0 otherwise (no reply yet, or the cached one is for a different index —
+//   the reply is async, so a stale value from a previous query must not be
+//   mistaken for this one's answer). Caller should have called
+//   dvr_api_get_total_time(index) first and polled this afterwards.
+uint8_t dvr_api_get_total_time_result(uint16_t index, uint32_t *seconds_out)
+{
+    if (!dvr_total_time_valid || dvr_total_time_index != index) {
+        return 0;
+    }
+    if (seconds_out) *seconds_out = dvr_total_time_sec;
+    return 1;
 }
 
 // DVR control API - Fast forward playback
