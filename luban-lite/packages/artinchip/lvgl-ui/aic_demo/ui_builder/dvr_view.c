@@ -16,6 +16,7 @@ static void del_poll_stop(void);
 static void dvr_request_file_list(void);
 static void dur_request(int row);
 static void dur_stop(void);
+static uint8_t get_fname(int idx, char *out, int sz);
 
 #define W_SHOW(w)  do { if(w) lv_obj_remove_flag((w), LV_OBJ_FLAG_HIDDEN); } while(0)
 #define W_HIDE(w)  do { if(w) lv_obj_add_flag((w), LV_OBJ_FLAG_HIDDEN); } while(0)
@@ -511,6 +512,7 @@ static void del_poll_stop(void)
 }
 
 static int del_pending_fi = -1;
+static int del_verify_no  = -1;  /* file number of the delete awaiting reconciliation, -1 = none */
 
 static void del_optimistic_remove(int fi)
 {
@@ -572,7 +574,6 @@ static void on_del_poll_timer(lv_timer_t *t)
     del_poll_stop();
     /* Drop any late ACK so it can't be taken for the next delete's. */
     dvr_api_clear_del_ack();
-    list_info_set("Delete failed: no reply from DVR", 1);
     del_pending_fi = -1;
     dvr_file_list_clear();
     dvr_request_file_list();
@@ -588,6 +589,27 @@ static void del_then_refresh(int fi)
     printf("DVR: del fi=%d, UI updated, background verify started\n", fi);
 }
 
+/* After a delete, the refetched list is the only reliable verdict (the
+ * DEL_FILE reply's status code is undocumented, and the device may not ACK
+ * at all): if the deleted file number is still listed, tell the user. */
+static void del_verify_check(void)
+{
+    if (del_verify_no < 0) return;
+    int no = del_verify_no;
+    del_verify_no = -1;
+    for (int fi = 0; fi < list_count; fi++) {
+        char fn[DVR_NAME_MAX];
+        if (!get_fname(fi, fn, sizeof(fn)) || strlen(fn) < 8) continue;
+        int n = (fn[4]-'0')*1000 + (fn[5]-'0')*100 + (fn[6]-'0')*10 + (fn[7]-'0');
+        if (n == no) {
+            printf("DVR: delete verify: file_no=%d still on the card\n", no);
+            list_info_set("Delete failed: file still on card", 1);
+            return;
+        }
+    }
+    printf("DVR: delete verify: file_no=%d gone\n", no);
+}
+
 static void on_filelist_poll_timer(lv_timer_t *t)
 {
     (void)t;
@@ -597,6 +619,7 @@ static void on_filelist_poll_timer(lv_timer_t *t)
         lv_timer_delete(list_poll_timer); list_poll_timer = NULL;
         dvr_file_list_populate(); hl_list(list_focus);
         printf("DVR: filelist ready, populated\n");
+        del_verify_check();
         return;
     }
     if (++list_poll_retries >= LIST_POLL_MAX_RETRIES) {
@@ -1185,6 +1208,7 @@ void dvr_page_deal_key_set(void)
                 if (list_mode == 1) par |= 0x8000;
                 if (list_tab == 1)  par |= 0x4000;
                 dvr_api_clear_del_ack();
+                del_verify_no = par & 0x3FFF;
                 dvr_send_normal_cmd(BD_CTRL_DEL_FILE, par);
                 printf("DVR: del file_no=%d (fi=%d)\n", par & 0x3FFF, fi);
             } else if (popup_src == POP_FORMAT) {
@@ -1198,10 +1222,17 @@ void dvr_page_deal_key_set(void)
         }
         if (popup_src == POP_FORMAT || popup_src == POP_FACTORY_RST) {
             show_sub(DVR_SUB_SETTING); hl_set(set_focus);
-        } else {
+        } else if (popup_focus == 0) {
+            /* Confirmed delete only. (Previously the cancel button fell
+             * through here too: the row vanished from the UI although no
+             * DEL_FILE was sent, and reappeared after the verify timeout.) */
             int del_fi = list_offset + list_focus;
             show_sub(DVR_SUB_LIST);
             del_then_refresh(del_fi);
+        } else {
+            /* Cancelled: back to the list, nothing changed. */
+            show_sub(DVR_SUB_LIST);
+            hl_list(list_focus);
         }
         break;
 
