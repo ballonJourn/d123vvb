@@ -56,6 +56,11 @@ static volatile uint8_t  dvr_total_time_valid = 0;
 // DEL_FILE acknowledgement flag: set to 1 when DVR replies to a DEL_FILE command.
 // Cleared by dvr_api_clear_del_ack() before sending DEL, polled by UI after.
 static volatile uint8_t  dvr_del_ack_received = 0;
+// Last DEL_FILE reply's echoed parameter and status word, kept so the UI can
+// log / inspect what the device actually answered (the success code of the
+// status word is not documented in this protocol, so it is only recorded).
+static volatile uint16_t dvr_del_ack_par    = 0;
+static volatile uint16_t dvr_del_ack_status = 0;
 
 // DVR firmware version string cache (populated by BD_CTRL_GET_ID response).
 // NUL-terminated. 32 bytes covers typical firmware version strings; truncated if longer.
@@ -694,6 +699,8 @@ static void dvr_recv_cmd_process(st_bd_ctrl_if_t *pctrl)
             printf("DVR: SET_TIME received, status=%d\n", pctrl->cmd_par);
             break;
         case BD_CTRL_DEL_FILE:
+            dvr_del_ack_par    = pctrl->cmd_par;
+            dvr_del_ack_status = pctrl->data_len;
             dvr_del_ack_received = 1;
             printf("DVR: DEL_FILE ACK received, par=0x%04X, status=%d\n", pctrl->cmd_par, pctrl->data_len);
             break;
@@ -1692,10 +1699,24 @@ uint8_t dvr_api_is_del_ack(void)
     return dvr_del_ack_received;
 }
 
-// DVR control API - Clear DEL_FILE ACK flag (call before sending DEL)
+// DVR control API - Read the DEL_FILE ACK together with the parameter and
+// status word the device replied with. Returns 1 if an ACK is pending.
+uint8_t dvr_api_get_del_ack(uint16_t *par_out, uint16_t *status_out)
+{
+    if (!dvr_del_ack_received) return 0;
+    if (par_out)    *par_out    = dvr_del_ack_par;
+    if (status_out) *status_out = dvr_del_ack_status;
+    return 1;
+}
+
+// DVR control API - Clear DEL_FILE ACK flag (call before sending DEL, and
+// again when giving up on a timed-out delete so a late ACK can't be mistaken
+// for the next one's)
 void dvr_api_clear_del_ack(void)
 {
     dvr_del_ack_received = 0;
+    dvr_del_ack_par      = 0;
+    dvr_del_ack_status   = 0;
 }
 
 // DVR control API - Start recording
@@ -1858,6 +1879,15 @@ uint8_t dvr_api_get_total_time_result(uint16_t index, uint32_t *seconds_out)
     }
     if (seconds_out) *seconds_out = dvr_total_time_sec;
     return 1;
+}
+
+// DVR control API - Drop the cached TOTAL_TIME reply. Call right before
+// dvr_api_get_total_time(): the reply only echoes the index, and the same
+// index can name a different clip on the front/rear tab, so a stale cached
+// value must not be returned for the new query.
+void dvr_api_clear_total_time(void)
+{
+    dvr_total_time_valid = 0;
 }
 
 // DVR control API - Fast forward playback

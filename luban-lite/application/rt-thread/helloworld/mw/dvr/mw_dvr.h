@@ -220,7 +220,9 @@ void     dvr_api_lock_file(uint16_t index);
 void     dvr_api_unlock_file(uint16_t index);
 void     dvr_api_get_total_time(uint16_t index);
 uint8_t  dvr_api_get_total_time_result(uint16_t index, uint32_t *seconds_out);
+void     dvr_api_clear_total_time(void);
 uint8_t  dvr_api_is_del_ack(void);
+uint8_t  dvr_api_get_del_ack(uint16_t *par_out, uint16_t *status_out);
 void     dvr_api_clear_del_ack(void);
 
 /* ---------- Status / TF card capacity ---------- */

@@ -14,10 +14,26 @@
 static void show_sub(dvr_sub_page_e sub);
 static void del_poll_stop(void);
 static void dvr_request_file_list(void);
+static void dur_request(int row);
+static void dur_stop(void);
 
 #define W_SHOW(w)  do { if(w) lv_obj_remove_flag((w), LV_OBJ_FLAG_HIDDEN); } while(0)
 #define W_HIDE(w)  do { if(w) lv_obj_add_flag((w), LV_OBJ_FLAG_HIDDEN); } while(0)
 #define W_VISIBLE(w, vis)  do { if(vis) { W_SHOW(w); } else { W_HIDE(w); } } while(0)
+
+/* lv_image_set_src() always calls lv_image_decoder_get_info(), i.e. it opens
+ * the PNG under /rodata and has the MPP decoder parse its header, even when
+ * the new src equals the current one. Every focus move used to re-set a dozen
+ * icons this way, competing with the live MJPEG preview for the VE decoder
+ * and the rodata filesystem. Only touch the image when the path really
+ * changes. (All images in this file are file-path sources.) */
+static void img_set(lv_obj_t *w, const char *src)
+{
+    if (!w || !src) return;
+    const char *cur = (const char *)lv_image_get_src(w);
+    if (cur && (cur == src || strcmp(cur, src) == 0)) return;
+    lv_image_set_src(w, src);
+}
 
 static lv_obj_t *dvr_main_view    = NULL;
 static lv_obj_t *dvr_idle_view    = NULL;
@@ -35,12 +51,35 @@ static lv_obj_t *file_name_w[DVR_FILE_ITEM_MAX]  = {0};
 static lv_obj_t *file_icon_w[DVR_FILE_ITEM_MAX]  = {0};
 static lv_obj_t *file_view_w[DVR_FILE_ITEM_MAX]  = {0};
 static lv_obj_t *file_del_w[DVR_FILE_ITEM_MAX]   = {0};
-/* Lock/unlock button per row. No dedicated lock icon exists among the
- * ported assets, so the settings gear icon is reused as a stand-in and
- * a small label underneath (file_lock_lbl_w) spells out "Lock"/"Unlock"
- * so the action is still unambiguous. */
-static lv_obj_t *file_lock_w[DVR_FILE_ITEM_MAX]     = {0};
-static lv_obj_t *file_lock_lbl_w[DVR_FILE_ITEM_MAX] = {0};
+/* Lock/unlock button per row. The icon shows the row's CURRENT state
+ * (closed padlock = a LOCK-prefixed file, open padlock = any other); pressing
+ * SET on it toggles. row_locked[] is derived from the file name prefix in
+ * dvr_file_list_set_name(). */
+static lv_obj_t *file_lock_w[DVR_FILE_ITEM_MAX] = {0};
+static uint8_t   row_locked[DVR_FILE_ITEM_MAX]  = {0};
+
+/* One-line info label at the bottom of the file list: shows the focused
+ * clip's duration, or a short transient message (e.g. delete failed). */
+static lv_obj_t   *list_info_lbl    = NULL;
+static int         info_pinned      = 0;
+static uint32_t    info_pin_start   = 0;
+#define INFO_PIN_MS  4000
+static lv_timer_t *dur_timer        = NULL;
+static int         dur_pending_no   = -1;
+static int         dur_retries      = 0;
+#define DUR_POLL_INTERVAL_MS  100
+#define DUR_POLL_MAX_RETRIES  20
+
+/* pin != 0: show text and keep it for INFO_PIN_MS (later non-pinned
+ * updates, e.g. from a list refresh, are ignored during that window). */
+static void list_info_set(const char *txt, int pin)
+{
+    if (!list_info_lbl) return;
+    if (!pin && info_pinned && lv_tick_elaps(info_pin_start) < INFO_PIN_MS) return;
+    info_pinned = pin ? 1 : 0;
+    if (pin) info_pin_start = lv_tick_get();
+    lv_label_set_text(list_info_lbl, txt);
+}
 
 static lv_obj_t *list_tab_sel    = NULL;
 static lv_obj_t *tab_label_left  = NULL;
@@ -90,11 +129,11 @@ static int list_offset   = 0;
  * query command in this protocol (BD_CTRL_GET_STS doesn't report them,
  * and there's no dedicated "get current resolution/stamp" command) — the
  * DVR can't actually be asked what it's currently set to, so these two
- * start from an assumed default and only reflect what this session has
- * set, not necessarily the device's true last-set value. */
+ * start UNKNOWN (-1: no selector dot is drawn) rather than showing a guess,
+ * and only show a value once the user has set it in this session. */
 static int mic_val   = 1;  /* 0=off, 1=on (assumed default; reconciled from GET_STS at Settings-open) */
-static int stamp_val = 1;  /* 0=off, 1=on (assumed default — no query exists, see note above) */
-static int res_val   = DVR_RES_1080P;  /* assumed default — no query exists, see note above */
+static int stamp_val = -1; /* -1=unknown (selector dot hidden), 0=off, 1=on */
+static int res_val   = -1; /* -1=unknown (selector dot hidden), else DVR_RES_* */
 
 typedef enum { POP_FILE_DEL=0, POP_FORMAT=1, POP_NO_SD=2, POP_FACTORY_RST=3 } pop_src_e;
 static pop_src_e popup_src = POP_FILE_DEL;
@@ -162,6 +201,7 @@ static void show_sub(dvr_sub_page_e sub)
             list_fetch_pending = 0;
         }
         del_poll_stop();
+        dur_stop();
     }
 
 
@@ -193,7 +233,7 @@ static void hl_dock(int i)
 {
     for (int n = 0; n < DVR_DOCK_BTN_MAX; n++) {
         if (dock_btn[n]) {
-            lv_image_set_src(dock_btn[n], (n == i) ? dock_icon_p[n] : dock_icon_n[n]);
+            img_set(dock_btn[n], (n == i) ? dock_icon_p[n] : dock_icon_n[n]);
         }
     }
     dock_focus = i;
@@ -206,6 +246,13 @@ static void hl_cam(int i)
     if (dvr_cam_tab_sel) lv_obj_set_pos(dvr_cam_tab_sel, i * 256, 0);
 }
 
+static const char *lock_icon(int locked, int pressed)
+{
+    if (locked)
+        return pressed ? LVGL_IMAGE_PATH(dvr/ui_img_icon_lock_p.png)   : LVGL_IMAGE_PATH(dvr/ui_img_icon_lock_n.png);
+    return pressed     ? LVGL_IMAGE_PATH(dvr/ui_img_icon_unlock_p.png) : LVGL_IMAGE_PATH(dvr/ui_img_icon_unlock_n.png);
+}
+
 static void hl_list(int i)
 {
     for (int n = 0; n < DVR_FILE_ITEM_MAX; n++) {
@@ -214,9 +261,11 @@ static void hl_list(int i)
                 (n == i) ? lv_color_hex(0x00FF00) : lv_color_hex(0x083557),
                 LV_PART_MAIN);
         }
-        if (file_view_w[n]) lv_image_set_src(file_view_w[n], LVGL_IMAGE_PATH(dvr/ui_img_icon_view_n.png));
-        if (file_del_w[n])  lv_image_set_src(file_del_w[n],  LVGL_IMAGE_PATH(dvr/ui_img_icon_delete_n.png));
+        if (file_view_w[n]) img_set(file_view_w[n], LVGL_IMAGE_PATH(dvr/ui_img_icon_view_n.png));
+        if (file_del_w[n])  img_set(file_del_w[n],  LVGL_IMAGE_PATH(dvr/ui_img_icon_delete_n.png));
+        if (file_lock_w[n]) img_set(file_lock_w[n], lock_icon(row_locked[n], 0));
     }
+    dur_request(i);
 }
 
 static void hl_list_act(int act)
@@ -225,14 +274,14 @@ static void hl_list_act(int act)
     int i = list_focus;
     if (i >= 0 && i < DVR_FILE_ITEM_MAX) {
         if (file_view_w[i])
-            lv_image_set_src(file_view_w[i],
+            img_set(file_view_w[i],
                 (act == LIST_ACT_PLAY) ? LVGL_IMAGE_PATH(dvr/ui_img_icon_view_p.png) : LVGL_IMAGE_PATH(dvr/ui_img_icon_view_n.png));
         if (file_del_w[i])
-            lv_image_set_src(file_del_w[i],
+            img_set(file_del_w[i],
                 (act == LIST_ACT_DELETE) ? LVGL_IMAGE_PATH(dvr/ui_img_icon_delete_p.png) : LVGL_IMAGE_PATH(dvr/ui_img_icon_delete_n.png));
         if (file_lock_w[i])
-            lv_image_set_src(file_lock_w[i],
-                (act == LIST_ACT_LOCK) ? LVGL_IMAGE_PATH(dvr/ui_img_icon_settings_p.png) : LVGL_IMAGE_PATH(dvr/ui_img_icon_settings_n.png));
+            img_set(file_lock_w[i],
+                lock_icon(row_locked[i], act == LIST_ACT_LOCK));
     }
 }
 
@@ -270,9 +319,20 @@ static void hl_set(int r)
     if (!dvr_setting_view) return;
     for (int i = 0; i < DVR_SET_ROW_MAX; i++) {
         if (set_row_bg[i]) {
-            lv_image_set_src(set_row_bg[i],
+            img_set(set_row_bg[i],
                 (i == r) ? LVGL_IMAGE_PATH(dvr/ui_img_settings_btn1_p.png) : LVGL_IMAGE_PATH(dvr/ui_img_settings_btn1_n.png));
         }
+    }
+    /* Rows sit 100px apart starting at y=110 (80px tall), but the view is
+     * only 600px high: scroll so the focused row's bottom edge (+10px margin)
+     * stays on screen. Rows 0-4 need no scroll (y stays 0); row 7 needs ~300
+     * (lv_obj_scroll_to_y clamps to the real content height). Layout must be
+     * up to date first or the scrollable height is not known yet. */
+    if (r >= 0 && r < DVR_SET_ROW_MAX) {
+        int y = 110 + 100 * r + 80 + 10 - 600;
+        if (y < 0) y = 0;
+        lv_obj_update_layout(dvr_setting_view);
+        lv_obj_scroll_to_y(dvr_setting_view, y, LV_ANIM_OFF);
     }
 }
 
@@ -291,12 +351,14 @@ static void hl_mic(int v)
 }
 static void hl_stamp(int v)
 {
-    if (set_stamp_sel) lv_obj_set_pos(set_stamp_sel, (v == 1) ? 285 : 615, 28);
+    W_VISIBLE(set_stamp_sel, v >= 0);
+    if (set_stamp_sel && v >= 0) lv_obj_set_pos(set_stamp_sel, (v == 1) ? 285 : 615, 28);
     stamp_val = v;
 }
 static void hl_res(int v)
 {
-    if (set_res_sel) lv_obj_set_pos(set_res_sel, (v == DVR_RES_1080P) ? 285 : 615, 28);
+    W_VISIBLE(set_res_sel, v >= 0);
+    if (set_res_sel && v >= 0) lv_obj_set_pos(set_res_sel, (v == DVR_RES_1080P) ? 285 : 615, 28);
     res_val = v;
 }
 
@@ -312,17 +374,17 @@ static void hl_popup(int f)
 
     if (popup_src == POP_NO_SD) {
         W_SHOW(popup_confirm_bg);
-        lv_image_set_src(popup_confirm_bg, LVGL_IMAGE_PATH(dvr/ui_img_pop_up_btn_p.png));
+        img_set(popup_confirm_bg, LVGL_IMAGE_PATH(dvr/ui_img_pop_up_btn_p.png));
         W_SHOW(popup_confirm_lbl);
         lv_label_set_text(popup_confirm_lbl, "OK");
         W_HIDE(popup_cancel_bg);
         W_HIDE(popup_cancel_lbl);
     } else {
         W_SHOW(popup_confirm_bg);
-        lv_image_set_src(popup_confirm_bg,
+        img_set(popup_confirm_bg,
             (f == 0) ? LVGL_IMAGE_PATH(dvr/ui_img_pop_up_btn_p.png) : LVGL_IMAGE_PATH(dvr/ui_img_pop_up_btn_n.png));
         W_SHOW(popup_cancel_bg);
-        lv_image_set_src(popup_cancel_bg,
+        img_set(popup_cancel_bg,
             (f == 1) ? LVGL_IMAGE_PATH(dvr/ui_img_pop_up_btn_p.png) : LVGL_IMAGE_PATH(dvr/ui_img_pop_up_btn_n.png));
         W_SHOW(popup_confirm_lbl);
         lv_label_set_text(popup_confirm_lbl, "OK");
@@ -341,7 +403,7 @@ static void popup_show_loading(void)
     W_HIDE(popup_cancel_lbl);
     if (popup_loading_w) {
         W_SHOW(popup_loading_w);
-        lv_image_set_src(popup_loading_w, LVGL_IMAGE_PATH(dvr/ui_img_dvr_loading_0.png));
+        img_set(popup_loading_w, LVGL_IMAGE_PATH(dvr/ui_img_dvr_loading_0.png));
     }
 }
 
@@ -395,7 +457,7 @@ static void on_loading_poll_timer(lv_timer_t *t)
     if (cur_sub == DVR_SUB_LOADING) {
         loading_anim_frame = (loading_anim_frame + 1) & 7;
         if (popup_loading_w)
-            lv_image_set_src(popup_loading_w, loading_imgs[loading_anim_frame]);
+            img_set(popup_loading_w, loading_imgs[loading_anim_frame]);
     }
 
     int tf_ok = dvr_api_get_tf_capacity(NULL, NULL);
@@ -480,10 +542,12 @@ static void on_del_poll_timer(lv_timer_t *t)
      * instead of just waiting out a fixed number of ticks and hoping —
      * dvr_api_is_del_ack()/dvr_api_clear_del_ack() exist for exactly
      * this and were previously never read anywhere. */
-    if (dvr_api_is_del_ack()) {
+    uint16_t ack_par = 0, ack_status = 0;
+    if (dvr_api_get_del_ack(&ack_par, &ack_status)) {
         dvr_api_clear_del_ack();
         del_poll_stop();
-        printf("DVR: del ACK received (fi=%d) — refreshing list\n", del_pending_fi);
+        printf("DVR: del ACK received (fi=%d par=0x%04X status=%u) — refreshing list\n",
+               del_pending_fi, ack_par, ack_status);
         del_pending_fi = -1;
         /* Refetch even on confirmed success: deleting a file shifts every
          * later file's index on the device, so the optimistic single-row
@@ -506,6 +570,9 @@ static void on_del_poll_timer(lv_timer_t *t)
     printf("DVR: del ACK timeout after %d retries (fi=%d) — refreshing list to reconcile\n",
            del_poll_retries, del_pending_fi);
     del_poll_stop();
+    /* Drop any late ACK so it can't be taken for the next delete's. */
+    dvr_api_clear_del_ack();
+    list_info_set("Delete failed: no reply from DVR", 1);
     del_pending_fi = -1;
     dvr_file_list_clear();
     dvr_request_file_list();
@@ -589,11 +656,60 @@ static uint8_t get_fname(int idx, char *out, int sz)
     return 1;
 }
 
+static void dur_stop(void)
+{
+    if (dur_timer) { lv_timer_delete(dur_timer); dur_timer = NULL; }
+    dur_pending_no = -1;
+}
+
+static void on_dur_timer(lv_timer_t *t)
+{
+    (void)t;
+    uint32_t sec = 0;
+    char b[48];
+    if (dur_pending_no >= 0 &&
+        dvr_api_get_total_time_result((uint16_t)dur_pending_no, &sec)) {
+        if (sec >= 3600)
+            snprintf(b, sizeof(b), "Duration: %u:%02u:%02u",
+                     (unsigned)(sec / 3600), (unsigned)((sec / 60) % 60), (unsigned)(sec % 60));
+        else
+            snprintf(b, sizeof(b), "Duration: %02u:%02u", (unsigned)(sec / 60), (unsigned)(sec % 60));
+        list_info_set(b, 0);
+        dur_stop();
+        return;
+    }
+    if (++dur_retries >= DUR_POLL_MAX_RETRIES) {
+        list_info_set("Duration: --:--", 0);
+        dur_stop();
+    }
+}
+
+/* Ask the DVR for the focused clip's length and show it in list_info_lbl.
+ * Only videos have a duration (list_mode 0); the reply is async, so poll
+ * dvr_api_get_total_time_result() on a short timer. The cache is cleared
+ * first because the reply is keyed by file number only. */
+static void dur_request(int row)
+{
+    char fn[DVR_NAME_MAX];
+    dur_stop();
+    if (cur_sub != DVR_SUB_LIST && cur_sub != DVR_SUB_LIST_ACT) return;
+    if (list_mode != 0 || row < 0 || !get_fname(list_offset + row, fn, sizeof(fn)) || strlen(fn) < 8) {
+        list_info_set("", 0);
+        return;
+    }
+    dur_pending_no = (fn[4]-'0')*1000 + (fn[5]-'0')*100 + (fn[6]-'0')*10 + (fn[7]-'0');
+    dur_retries = 0;
+    list_info_set("Duration: ...", 0);
+    dvr_api_clear_total_time();
+    dvr_api_get_total_time((uint16_t)dur_pending_no);
+    dur_timer = lv_timer_create(on_dur_timer, DUR_POLL_INTERVAL_MS, NULL);
+}
+
 static lv_obj_t *mk_img(lv_obj_t *par, const char *src,
                          int x, int y, int w, int h)
 {
     lv_obj_t *img = lv_image_create(par);
-    lv_image_set_src(img, src);
+    img_set(img, src);
     lv_obj_set_pos(img, x, y);
     lv_obj_set_size(img, w, h);
     lv_obj_remove_flag(img, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
@@ -703,29 +819,24 @@ static void build_layout(lv_obj_t *parent)
         int iy = i * 70;
         /* Row widened 600 -> 700 to fit the new 3rd (lock/unlock) button;
          * the scroll container is 936px wide, so there's ample headroom. */
-        lv_obj_t *row = mk_panel(scroll, 0, iy, 700, 60);
+        lv_obj_t *row = mk_panel(scroll, 0, iy, 710, 60);
         mk_img(row, LVGL_IMAGE_PATH(dvr/ui_img_list_bg_n.png), 0, 0, 600, 60);
-        mk_img(row, LVGL_IMAGE_PATH(dvr/ui_img_list_bg_n.png), 600, 0, 100, 60);
+        mk_img(row, LVGL_IMAGE_PATH(dvr/ui_img_list_bg_n.png), 600, 0, 110, 60);
         file_icon_w[i] = mk_img(row, LVGL_IMAGE_PATH(dvr/ui_img_list_icon_video_n.png), 10, 0, 60, 60);
         file_name_w[i] = mk_label(row, "", 80, 12, 320, 35, 28);
         lv_obj_set_style_text_color(file_name_w[i], lv_color_hex(0x083557), LV_PART_MAIN);
         file_view_w[i] = mk_img(row, LVGL_IMAGE_PATH(dvr/ui_img_icon_view_n.png),   390, 0, 100, 60);
         file_del_w[i]  = mk_img(row, LVGL_IMAGE_PATH(dvr/ui_img_icon_delete_n.png), 500, 0, 100, 60);
-        /* No dedicated lock icon asset exists; reuse the settings gear
-         * icon and spell out Lock/Unlock in a small label underneath so
-         * the action stays unambiguous despite the placeholder icon. */
-        file_lock_w[i]     = mk_img(row, LVGL_IMAGE_PATH(dvr/ui_img_icon_settings_n.png), 610, 2, 36, 36);
-        file_lock_lbl_w[i] = mk_label(row, "Lock", 600, 38, 100, 20, 14);
-        /* mk_label defaults to white text; against this light row
-         * background that's unreadable, same reason file_name_w above
-         * overrides it to a dark color. */
-        lv_obj_set_style_text_color(file_lock_lbl_w[i], lv_color_hex(0x083557), LV_PART_MAIN);
-        lv_obj_set_style_text_align(file_lock_lbl_w[i], LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+        /* Same 100x60 button style as view/delete; icon = current lock state. */
+        file_lock_w[i] = mk_img(row, lock_icon(0, 0), 610, 0, 100, 60);
     }
 
     list_no_sd_label = mk_label(dvr_list_view, "No SD Card", 362, 200, 300, 60, 32);
     W_HIDE(list_no_sd_label);
 
+
+    list_info_lbl = mk_label(dvr_list_view, "", 44, 445, 936, 40, 28);
+    lv_obj_set_style_text_color(list_info_lbl, lv_color_hex(0x083557), LV_PART_MAIN);
 
     lv_obj_t *list_dock = mk_panel(dvr_list_view, 0, 500, 1024, 100);
     mk_img(list_dock, LVGL_IMAGE_PATH(dvr/ui_img_dock_bg.png), 0, 0, 1024, 100);
@@ -744,6 +855,10 @@ static void build_layout(lv_obj_t *parent)
      * UP/DOWN-driven focus (hl_set()) moves onto them. */
     lv_obj_add_flag(dvr_setting_view, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scroll_dir(dvr_setting_view, LV_DIR_VER);
+    /* Scrolling is driven only by hl_set() (key focus): no scrollbar, no
+     * elastic over-scroll, no momentum. */
+    lv_obj_set_scrollbar_mode(dvr_setting_view, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_remove_flag(dvr_setting_view, LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_MOMENTUM);
     /* ui_img_dvr_list_bg.png was a 100% flat 0xC1DBFD fill with no
      * graphic content — the bg_color below draws the identical result
      * for the whole scrollable height (original 600px rows AND the new
@@ -1003,7 +1118,7 @@ void dvr_page_deal_key_set(void)
             break;
         }
         case DVR_SET_STAMP: {
-            int v = stamp_val ? 0 : 1;
+            int v = (stamp_val == 1) ? 0 : 1;  /* unknown (-1) -> On first */
             hl_stamp(v);
             dvr_api_set_stamp((uint8_t)v);
             printf("DVR: stamp -> %s\n", v ? "on" : "off");
@@ -1234,14 +1349,22 @@ void dvr_set_current_sub(dvr_sub_page_e sub) { show_sub(sub); }
 
 void dvr_file_list_set_name(int i, const char *n)
 {
-    if (i >= 0 && i < DVR_FILE_ITEM_MAX && file_name_w[i] && n)
+    if (i >= 0 && i < DVR_FILE_ITEM_MAX && file_name_w[i] && n) {
         lv_label_set_text(file_name_w[i], n);
+        row_locked[i] = (strncmp(n, "LOCK", 4) == 0);
+        if (file_lock_w[i])
+            img_set(file_lock_w[i], lock_icon(row_locked[i],
+                (cur_sub == DVR_SUB_LIST_ACT && list_focus == i && list_act_focus == LIST_ACT_LOCK)));
+    }
 }
 
 void dvr_file_list_clear(void)
 {
-    for (int i = 0; i < DVR_FILE_ITEM_MAX; i++)
+    for (int i = 0; i < DVR_FILE_ITEM_MAX; i++) {
+        row_locked[i] = 0;
         if (file_name_w[i]) lv_label_set_text(file_name_w[i], "");
+        if (file_lock_w[i]) img_set(file_lock_w[i], lock_icon(0, 0));
+    }
 }
 
 void dvr_file_list_populate(void)
