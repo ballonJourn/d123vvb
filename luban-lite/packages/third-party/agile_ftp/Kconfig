@@ -1,0 +1,31 @@
+# agile_ftp: lightweight FTP server (https://github.com/loogg/agile_ftp)
+menuconfig LPKG_USING_AGILE_FTP
+    bool "agile_ftp: FTP server over SAL socket + DFS"
+    depends on RT_USING_SAL && SAL_USING_POSIX && RT_USING_DFS
+    default n
+
+if LPKG_USING_AGILE_FTP
+    config FTP_MAX_SESSION_NUM
+        int "Max FTP client sessions"
+        default 4
+
+    config FTP_SESSION_USERNAME
+        string "FTP username"
+        default "adas"
+
+    config FTP_SESSION_PASSWORD
+        string "FTP password"
+        default "adas"
+
+    config AGILE_FTP_AUTOSTART
+        bool "Start FTP server at boot (INIT_APP_EXPORT)"
+        default y
+
+    config AGILE_FTP_THREAD_STACK
+        int "FTP thread stack size"
+        default 4096
+
+    config AGILE_FTP_THREAD_PRIO
+        int "FTP thread priority"
+        default 20
+endif
