@@ -207,6 +207,10 @@ if RT_USING_LWIP
         int "Enable netif link status callback"
         default 1
 
+    config RT_LWIP_IP_FORWARD
+        bool "Enable IP forwarding between network interfaces (IP_FORWARD)"
+        default n
+
     config SO_REUSE
         int "Enable SO_REUSEADDR option"
         default 1

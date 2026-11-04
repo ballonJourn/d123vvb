@@ -451,7 +451,11 @@
 /* Define IP_FORWARD to 1 if you wish to have the ability to forward
    IP packets across network interfaces. If you are going to run lwIP
    on a device with only one network interface, define this to 0. */
+#ifdef RT_LWIP_IP_FORWARD
+#define IP_FORWARD                  1
+#else
 #define IP_FORWARD                  0
+#endif
 
 /* IP reassembly and segmentation.These are orthogonal even
  * if they both deal with IP fragments */
