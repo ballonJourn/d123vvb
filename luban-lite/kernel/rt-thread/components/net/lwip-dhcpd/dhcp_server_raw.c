@@ -703,7 +703,9 @@ void dhcpd_start(const char *netif_name)
 
     if (1)
     {
+#ifdef RT_LWIP_DHCP
         dhcp_stop(netif);
+#endif
 
         set_if(netif_name, DHCPD_SERVER_IP, "0.0.0.0", "255.255.255.0");
 
