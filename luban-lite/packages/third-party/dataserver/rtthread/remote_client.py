@@ -57,8 +57,10 @@ def safe_local_path(out_dir, server_path):
     return os.path.join(out_dir, *parts)
 
 
-def get_file(sock, block, out_dir, verbose=True):
-    """receive one file; returns (path, size) or None when the server is done"""
+def get_file(sock, block, out_dir, verbose=True, on_file=None, on_block=None):
+    """receive one file; returns (path, size) or None when the server is done.
+    on_file(server_path, size, nblocks) is called before the data,
+    on_block(server_path, index, nblocks, nbytes) after every block."""
     try:
         raw = read_data(sock, PATH_FIELD)
     except ProtocolError:
@@ -67,29 +69,39 @@ def get_file(sock, block, out_dir, verbose=True):
     (size,) = struct.unpack("<i", read_data(sock, 4))
     local = safe_local_path(out_dir, path)
     os.makedirs(os.path.dirname(local), exist_ok=True)
+    nblocks = (size + block - 1) // block
+    if on_file:
+        on_file(path, size, nblocks)
     left = size
     with open(local, "wb") as f:
-        for _ in range((size + block - 1) // block):
+        for i in range(nblocks):
             b = read_data(sock, block)
-            f.write(b[:min(block, left)])   # last block is zero padded
+            n = min(block, left)
+            f.write(b[:n])                   # last block is zero padded
             left -= block
+            if on_block:
+                on_block(path, i, nblocks, n)
     if verbose:
         print("Received: %s (%d bytes)" % (local, size))
     return local, size
 
 
-def fetch(ip, port, directory, out_dir="results", timeout=15.0, verbose=True):
-    """download a whole directory; returns list of (local_path, size)"""
+def fetch(ip, port, directory, out_dir="results", timeout=15.0, verbose=True,
+          on_file=None, on_block=None, on_connect=None):
+    """download a whole directory; returns list of (local_path, size).
+    on_connect(block_size) is called once the server announced its block size."""
     sock = socket.create_connection((ip, port), timeout=timeout)
     try:
         (block,) = struct.unpack("<i", read_data(sock, 4))
+        if on_connect:
+            on_connect(block)
         req = directory.encode("utf-8")
         if len(req) >= PATH_FIELD:
             raise ProtocolError("path too long")
         send_data(sock, req + b"\x00" * (PATH_FIELD - len(req)))
         files = []
         while True:
-            got = get_file(sock, block, out_dir, verbose)
+            got = get_file(sock, block, out_dir, verbose, on_file, on_block)
             if got is None:
                 break
             files.append(got)
