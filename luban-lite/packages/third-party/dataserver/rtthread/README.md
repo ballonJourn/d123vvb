@@ -108,6 +108,29 @@ make -C ../Project2 client
 
 Files land in `results/<dir>/...` (or `-o`).
 
+## Live dashboard (PC)
+
+`../dashboard/` is [MusadiqPasha/file_transfer](https://github.com/MusadiqPasha/file_transfer)
+(imported with `git subtree`, history kept) adapted to this protocol: the
+browser asks the board for a directory and shows, while it arrives, the live
+throughput curve, the file list, the blocks of the current file, the SHA-256
+of every received file and the transfer log. It runs offline.
+
+```
+pip install -r ../dashboard/requirements.txt
+python ../dashboard/client_web.py          # then open http://localhost:5002
+```
+
+Environment variables: `DATASERVER_HOST` (default 192.168.169.1),
+`DATASERVER_PORT` (9000), `DASHBOARD_OUT` (download directory),
+`DASHBOARD_PORT` (5002). The upstream `server.py` / `server_ui.html` are kept
+but not used. Upstream has no license file either: evaluation use only.
+
+![dashboard](../dashboard/d133_dashboard.png)
+
+The protocol does not announce how many files a request contains, so the
+"Files" counter grows as files arrive.
+
 ## Tests
 
 The board C code is also built for the host and tested against both clients:
@@ -118,6 +141,8 @@ python3 -m unittest discover -s rtthread/tests -v
 make -C rtthread/host asan            # then rerun the tests
 make -C rtthread/host tsan
 ```
+
+`test_dashboard.py` also drives the dashboard backend (needs Flask).
 
 Covered: block-size edge cases (0, 1, B-1, B, B+1, B/2, 2B, 7B+3, 250 kB),
 nested directories, upstream C++ client and Python client, empty/missing

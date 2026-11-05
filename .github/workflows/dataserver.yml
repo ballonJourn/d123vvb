@@ -21,6 +21,8 @@ jobs:
         working-directory: luban-lite/packages/third-party/dataserver
     steps:
       - uses: actions/checkout@v4
+      - name: Python deps (dashboard tests)
+        run: pip install -r dashboard/requirements.txt
       - name: Build upstream client and board C port for the host
         run: |
           make -C rtthread/host remoteClient
