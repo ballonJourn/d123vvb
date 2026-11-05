@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-dsstat endpoint (rtthread/dsstat.c) and the dashboard's board network panel.
+dsstat endpoint (rtthread/dsstat.c). The Strata dashboard side is covered by
+test_strata_d133.py.
 
 The host build serves /proc/net/dev counters in place of the board's netmon
 hooks, so pulling a file over 127.0.0.1 must show up on "lo" exactly as a pull
 over WiFi shows up on "w1" on the board.
 """
-import importlib
 import json
 import os
 import shutil
@@ -23,12 +23,6 @@ PKG = os.path.dirname(RTT)
 SERVER = os.path.join(RTT, "host", "dataserver_c")
 sys.path.insert(0, RTT)
 import remote_client  # noqa: E402
-
-try:
-    import flask  # noqa: F401
-    HAVE_FLASK = True
-except ImportError:
-    HAVE_FLASK = False
 
 
 def free_port():
@@ -126,96 +120,6 @@ class DsstatEndpointTest(unittest.TestCase):
     def test_many_quick_connections(self):
         for _ in range(40):
             read_stats(self.srv.sport)
-
-
-class BoardUpdateTest(unittest.TestCase):
-    """client_web.board_update: rates from the board's uptime, uint32 wrap, reboot."""
-
-    @classmethod
-    def setUpClass(cls):
-        if not HAVE_FLASK:
-            raise unittest.SkipTest("flask not installed")
-        sys.path.insert(0, os.path.join(PKG, "dashboard"))
-        cls.web = importlib.import_module("client_web")
-
-    def sample(self, t, rx, tx, fw=-1):
-        return {"v": 1, "uptime_ms": t, "ip_forwarded": fw, "dataserver": None,
-                "ifs": [{"name": "w1", "ip": "192.168.169.1", "up": 1,
-                         "rx_bytes": rx, "tx_bytes": tx, "rx_pkts": 0, "tx_pkts": 0}]}
-
-    def state(self):
-        return {"history": {}}
-
-    def test_rate_and_wrap(self):
-        st = self.state()
-        prev = self.web.board_update(st, None, self.sample(1000, 2 ** 32 - 1000, 10, fw=2 ** 32 - 5))
-        self.assertIsNone(st["ifs"][0]["rx_rate"])
-        self.web.board_update(st, prev, self.sample(3000, 3000, 2010, fw=15))
-        self.assertEqual(st["ifs"][0]["rx_rate"], 2000)  # 4000 bytes over 2 s, across the wrap
-        self.assertEqual(st["ifs"][0]["tx_rate"], 1000)
-        self.assertEqual(st["fw_rate"], 10.0)            # 20 packets over 2 s, across the wrap
-        self.assertEqual(st["history"]["w1"], [[3.0, 2000, 1000]])
-
-    def test_reboot_resets(self):
-        st = self.state()
-        prev = self.web.board_update(st, None, self.sample(5000, 100, 100))
-        prev = self.web.board_update(st, prev, self.sample(6000, 200, 200))
-        self.assertEqual(len(st["history"]["w1"]), 1)
-        self.web.board_update(st, prev, self.sample(500, 5, 5))      # uptime went back
-        self.assertEqual(st["history"], {})
-        self.assertIsNone(st["ifs"][0]["rx_rate"])
-
-    def test_no_forward_counter(self):
-        st = self.state()
-        prev = self.web.board_update(st, None, self.sample(1000, 0, 0))
-        self.web.board_update(st, prev, self.sample(2000, 0, 0))
-        self.assertIsNone(st["ip_forwarded"])
-        self.assertIsNone(st["fw_rate"])
-
-
-@unittest.skipUnless(HAVE_FLASK, "flask not installed")
-class BoardApiTest(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.work = tempfile.mkdtemp(prefix="dsapi_")
-        os.makedirs(os.path.join(cls.work, "root"))
-        cls.srv = HostServer(os.path.join(cls.work, "root"))
-        sys.path.insert(0, os.path.join(PKG, "dashboard"))
-        cls.web = importlib.import_module("client_web")
-        cls.web.BOARD_POLL_S = 0.2
-        cls.client = cls.web.app.test_client()
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.srv.stop()
-        shutil.rmtree(cls.work, ignore_errors=True)
-
-    def wait(self, port, pred, timeout=5.0):
-        end = time.time() + timeout
-        while time.time() < end:
-            b = self.client.get(f"/api/board?board=127.0.0.1&port={port}").get_json()
-            if pred(b):
-                return b
-            time.sleep(0.1)
-        self.fail(f"timeout, last state {b}")
-
-    def test_live_rates(self):
-        b = self.wait(self.srv.sport, lambda b: b["ok"] and b["history"].get("lo"))
-        self.assertEqual(b["target"], f"127.0.0.1:{self.srv.sport}")
-        lo = next(i for i in b["ifs"] if i["name"] == "lo")
-        self.assertIsInstance(lo["rx_rate"], int)
-        self.assertEqual(b["dataserver"]["running"], 1)
-
-    def test_unreachable_board(self):
-        dead = free_port()
-        b = self.wait(dead, lambda b: b["error"])
-        self.assertFalse(b["ok"])
-        self.assertIn(str(dead), b["error"])
-        self.assertEqual(b["ifs"], [])
-
-    def test_bad_port(self):
-        r = self.client.get("/api/board?board=127.0.0.1&port=abc")
-        self.assertEqual(r.status_code, 400)
 
 
 if __name__ == "__main__":
