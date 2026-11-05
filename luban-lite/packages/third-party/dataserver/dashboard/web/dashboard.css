@@ -1,0 +1,27 @@
+/* D133 additions on top of the Strata components: pull form, chart, block grid, log. */
+.pullbar{margin-top:20px}
+.pullform{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;padding:16px 20px}
+.pullform label{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--st-ink-muted);text-transform:uppercase;letter-spacing:.8px}
+.pullform label.grow{flex:1;min-width:220px}
+.pullform input{font:14px var(--st-font-mono);color:var(--st-ink);background:var(--st-bg);border:1px solid var(--st-line);border-radius:9px;padding:9px 12px;text-transform:none;letter-spacing:0;min-width:0}
+.pullform input#board{width:170px}.pullform input#port{width:90px}
+.pullform input:focus-visible{outline:2px solid var(--st-focus);outline-offset:2px}
+.status-error .dot{background:var(--st-danger)}
+.status-error #status{color:var(--st-danger-text)}
+
+.chartpanel{margin-bottom:18px}
+.chartbox{position:relative;height:240px;padding:18px 64px 26px 20px}
+#chart{width:100%;height:100%;display:block}
+#chart .grid{stroke:var(--st-line-soft);stroke-width:1;vector-effect:non-scaling-stroke}
+#chart .area{fill:var(--st-accent-tint)}
+#chart .line{fill:none;stroke:var(--st-accent);stroke-width:2;vector-effect:non-scaling-stroke;stroke-linejoin:round}
+.axis{position:absolute;font:11px var(--st-font-mono);color:var(--st-ink-muted)}
+.axis.top{right:14px;top:14px}.axis.bottom{right:14px;bottom:24px}.axis.right{right:20px;bottom:6px}
+
+.request .endpoint{font:13px var(--st-font-mono);overflow-wrap:anywhere;margin:6px 0 2px}
+.sha{margin-top:6px;min-height:0;font-size:12px;color:var(--st-accent-text)}
+.blocks{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px;max-height:260px;overflow:auto}
+.blocks i{display:block;width:12px;height:12px;border-radius:3px;background:var(--st-line)}
+.blocks i.on{background:var(--st-accent)}
+.logbox{min-height:120px;max-height:240px;margin:0;border:0;border-radius:0;background:var(--st-bg)}
+@media(max-width:600px){.pullform input#board,.pullform input#port{width:100%}.chartbox{padding-right:56px}}

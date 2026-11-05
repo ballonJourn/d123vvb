@@ -3,9 +3,14 @@
 Web dashboard for pulling ADAS files off the D133 board over the dataServer
 protocol (NikosMav/System-Programming-3 wire format, see `../rtthread/dataserver.c`).
 
-The UI is adapted from [MusadiqPasha/file_transfer](https://github.com/MusadiqPasha/file_transfer)
-(Flask backend polled at `/api/status`, stats cards, progress bar, block grid, log).
-The transfer underneath is replaced by `rtthread/remote_client.py`.
+The Flask backend (polled at `/api/status`) comes from
+[MusadiqPasha/file_transfer](https://github.com/MusadiqPasha/file_transfer); the transfer
+underneath is replaced by `rtthread/remote_client.py`. The page is skinned with the design
+tokens, Outfit font and card/list/panel components of
+[Niko1221/Strata](https://github.com/Niko1221/Strata) (MIT, `web/LICENSE-Strata.txt`;
+font: SIL OFL, `web/fonts/OFL.txt`). Light and dark themes.
+
+![dashboard](d133_dashboard.png)
 
 ## Run (on the PC joined to the board's WiFi AP or plugged into its Ethernet)
 
@@ -22,9 +27,10 @@ Enter the board IP, port and a directory below the board's `DATASERVER_ROOT`
 
 | Panel | Source |
 |---|---|
-| Throughput curve (now / peak / total) | 0.5 s samples of received bytes |
-| Files list | one row per file announced by the board |
-| Blocks of the current file | one box per received block |
+| Status, files, throughput, received cards | live from `/api/status` |
+| Throughput curve (now / peak) | 0.5 s samples of received bytes |
+| Files list + detail | one row per file announced by the board; size, blocks, state |
+| Blocks of the selected file | one box per received block |
 | SHA-256 of each file | computed on the PC after the file is written |
 | Log | connect, block size, per-file result, errors |
 
@@ -45,9 +51,11 @@ The protocol itself has no checksum. The SHA-256 is for comparing against
 
 - Listens on `127.0.0.1` only; no web fonts or CDN, works with no internet.
 - File names from the board are rendered as text, never as HTML.
+- Page files: `client_ui.html` and `web/` (`strata-components.css`, `tokens.css`,
+  `dashboard.css`, `dashboard.js`, fonts). Only `web/` is served.
 - `server.py`, `server_ui.html`, `client.png`, `server.png` and `utils.py` are
   the unmodified upstream TCP-upload demo. The D133 dashboard does not use
   them; they are kept for reference and can be deleted.
-- `d133_dashboard.png` was taken against the host build of the C server
-  (`make -C ../rtthread/host`), not against the board.
+- `d133_dashboard.png` was taken with headless Chromium against the host build of the
+  C server (`make -C ../rtthread/host`) behind a ~330 KB/s throttle, not against the board.
 - Tests: `python3 -m unittest discover -s ../rtthread/tests -v`

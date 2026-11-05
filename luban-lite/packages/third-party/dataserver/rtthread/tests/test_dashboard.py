@@ -85,6 +85,24 @@ class DashboardTest(unittest.TestCase):
         self.assertIn("D133 dataServer", html)
         self.assertNotIn("fonts.googleapis", html)
 
+    def test_page_assets_are_local(self):
+        import re
+        html = self.client.get("/").get_data(as_text=True)
+        self.assertIsNone(re.search(r"(src|href)=[\"']https?://", html))
+        for url in re.findall(r"(?:src|href)=\"(/web/[^\"]+)\"", html):
+            r = self.client.get(url)
+            self.assertEqual(r.status_code, 200, url)
+            r.close()
+        r = self.client.get("/web/fonts/outfit-latin-wght.woff2")
+        self.assertEqual(r.status_code, 200)
+        r.close()
+
+    def test_web_route_refuses_traversal(self):
+        for url in ("/web/../client_web.py", "/web/%2e%2e/client_web.py", "/web/..%2fclient_web.py"):
+            r = self.client.get(url)
+            self.assertEqual(r.status_code, 404, url)
+            r.close()
+
     def test_pull_reports_progress_and_hashes(self):
         import hashlib
         d = self.pull("log")

@@ -77,6 +77,11 @@ app = Flask(__name__, static_folder=None)
 def index():
     return send_from_directory(HERE, "client_ui.html")
 
+@app.route("/web/<path:name>")
+def web_asset(name):
+    # CSS, JS and fonts of the page; send_from_directory refuses paths outside web/
+    return send_from_directory(os.path.join(HERE, "web"), name)
+
 @app.route("/api/config")
 def api_config():
     return jsonify({"board": DEFAULT_BOARD, "port": DEFAULT_PORT, "out": OUT_DIR})

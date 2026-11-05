@@ -1,427 +1,76 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html lang="en" data-theme="dark">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>D133 dataServer — Pull</title>
-<!-- web fonts removed: the PC is on the board's offline WiFi AP; system fonts are used -->
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: #141414; color: #e0e0e0; font-family: 'Inter', 'Segoe UI', 'Microsoft YaHei', sans-serif; font-size: 14px; min-height: 100vh; }
-  .header { background: #1c1c1c; border-bottom: 1px solid #2e2e2e; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
-  .header h1 { font-size: 16px; font-weight: 700; color: #fff; }
-  .header-right { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #666; }
-  .statusbar { background: #1c1c1c; border-bottom: 1px solid #2e2e2e; padding: 10px 24px; display: flex; align-items: center; gap: 12px; }
-  .badge { padding: 4px 12px; border-radius: 4px; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; }
-  .b-idle       { background:#2a2a2a; color:#666; }
-  .b-connecting { background:#2a1f00; color:#f59e0b; }
-  .b-sending    { background:#0a1929; color:#60a5fa; }
-  .b-receiving  { background:#0a1929; color:#60a5fa; }
-  .b-verifying  { background:#2a1f00; color:#f59e0b; }
-  .b-success    { background:#052010; color:#4ade80; }
-  .b-failed, .b-error { background:#1f0a0a; color:#f87171; }
-  .status-right { margin-left: auto; font-size: 13px; color: #666; }
-  .btn-plain { padding: 6px 14px; background: #2a2a2a; border: 1px solid #3a3a3a; border-radius: 6px; color: #888; font-family: 'Inter', sans-serif; font-size: 13px; cursor: pointer; }
-  .btn-plain:hover { background: #1f0a0a; border-color: #f87171; color: #f87171; }
-  .content { padding: 20px 24px; display: grid; grid-template-columns: 340px 1fr; gap: 20px; align-items: start; }
-  .left, .right { display: flex; flex-direction: column; gap: 14px; }
-  .card { background: #1c1c1c; border: 1px solid #2e2e2e; border-radius: 8px; padding: 16px; }
-  .card-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #555; margin-bottom: 12px; }
-  .drop-zone { border: 1.5px dashed #333; border-radius: 8px; padding: 28px 16px; text-align: center; cursor: pointer; position: relative; transition: all 0.2s; }
-  .drop-zone:hover, .drop-zone.drag { border-color: #666; background: #1a1a1a; }
-  .drop-zone input { position: absolute; inset:0; opacity:0; cursor:pointer; width:100%; }
-  .drop-icon { font-size: 28px; margin-bottom: 8px; }
-  .drop-text { font-size: 14px; font-weight: 600; color: #ccc; margin-bottom: 3px; }
-  .drop-sub  { font-size: 12px; color: #555; }
-  .file-info { background: #141414; border: 1px solid #2e2e2e; border-radius: 6px; padding: 10px 12px; display: none; }
-  .file-info.show { display: block; }
-  .file-name { font-weight: 600; font-size: 13px; color: #e0e0e0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-bottom: 2px; }
-  .file-size { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #555; }
-  .btn-send { width: 100%; padding: 13px; background: #e0e0e0; color: #141414; border: none; border-radius: 8px; font-family: 'Inter', sans-serif; font-size: 14px; font-weight: 700; cursor: pointer; transition: background 0.15s; }
-  .btn-send:hover:not(:disabled) { background: #fff; }
-  .btn-send:disabled { background: #2a2a2a; color: #444; cursor: default; }
-  .btn-reset-full { width: 100%; padding: 9px; background: transparent; border: 1px solid #2e2e2e; border-radius: 8px; color: #555; font-family: 'Inter', sans-serif; font-size: 13px; cursor: pointer; }
-  .btn-reset-full:hover { border-color: #f87171; color: #f87171; }
-
-  /* Stats grid */
-  .stats-mini { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
-  .stat-mini { background: #141414; border: 1px solid #2e2e2e; border-radius: 6px; padding: 10px 12px; }
-  .stat-mini-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #555; margin-bottom: 4px; }
-  .stat-mini-value { font-family: 'JetBrains Mono', monospace; font-size: 17px; color: #e0e0e0; }
-  .stat-mini-value.amber { color: #f59e0b; }
-  .stat-mini-value.green { color: #4ade80; }
-  .stat-mini-value small { font-size: 11px; color: #555; }
-
-  .prog-row { display: flex; justify-content: space-between; font-size: 12px; color: #666; margin-bottom: 7px; }
-  .prog-track { height: 5px; background: #2a2a2a; border-radius: 3px; overflow: hidden; }
-  .prog-fill  { height: 100%; background: #e0e0e0; border-radius: 3px; width: 0%; transition: width 0.4s ease; }
-  .prog-fill.done { background: #4ade80; }
-  .verify { border: 1px solid #2e2e2e; border-radius: 8px; padding: 14px; text-align: center; background: #141414; min-height: 56px; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 13px; color: #555; margin-top: 12px; }
-  .verify.success { border-color: #14532d; background: #052010; color: #4ade80; font-weight: 600; }
-  .verify.fail    { border-color: #7f1d1d; background: #1f0a0a; color: #f87171; font-weight: 600; }
-
-  .ck-row { display: grid; grid-template-columns: 68px 1fr; gap: 8px 10px; align-items: start; }
-  .ck-label { font-size: 11px; font-weight: 600; color: #555; padding-top: 9px; }
-  .ck-val { font-family: 'JetBrains Mono', monospace; font-size: 11px; background: #141414; border: 1px solid #2e2e2e; border-radius: 6px; padding: 8px 10px; word-break: break-all; color: #444; line-height: 1.5; }
-  .ck-val.match    { color: #4ade80; border-color: #14532d; }
-  .ck-val.mismatch { color: #f87171; border-color: #7f1d1d; }
-
-  .chunk-area { display: flex; flex-wrap: wrap; gap: 5px; min-height: 44px; }
-  .chunk-box { width: 34px; height: 34px; border-radius: 6px; background: #e0e0e0; color: #141414; display: flex; align-items: center; justify-content: center; font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 600; animation: pop 0.2s ease; }
-  .chunk-box.retransmit { background: #f59e0b; color: #141414; }
-  @keyframes pop { from{transform:scale(0.7);opacity:0} to{transform:scale(1);opacity:1} }
-
-  .log { background: #111; border: 1px solid #2e2e2e; border-radius: 8px; padding: 14px 16px; height: 220px; overflow-y: auto; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.8; }
-  .log::-webkit-scrollbar { width: 4px; }
-  .log::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
-  .log-line { color: #444; }
-  .log-line .ts { color: #333; margin-right: 8px; }
-  .log-line.fresh { color: #ccc; animation: fadein 0.3s ease; }
-  .log-line.nack-line { color: #f59e0b; }
-  @keyframes fadein { from{opacity:0;transform:translateY(3px)} to{opacity:1;transform:none} }
-  .placeholder { color: #3a3a3a; }
-
-  /* added for the dataServer pull dashboard */
-  .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
-  .field label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #555; }
-  .field input { background: #141414; border: 1px solid #2e2e2e; border-radius: 6px; padding: 8px 10px; color: #e0e0e0; font-family: 'JetBrains Mono', monospace; font-size: 13px; }
-  .field input:focus { outline: none; border-color: #666; }
-  .field-row { display: grid; grid-template-columns: 1fr 90px; gap: 8px; }
-  .tp-head { display: flex; gap: 24px; margin-bottom: 10px; font-family: 'JetBrains Mono', monospace; }
-  .tp-head .v { font-size: 18px; color: #4ade80; }
-  .tp-head .l { font-size: 10px; color: #555; text-transform: uppercase; letter-spacing: 0.5px; }
-  #tp-chart { width: 100%; height: 160px; display: block; background: #141414; border: 1px solid #2e2e2e; border-radius: 6px; }
-  .files { width: 100%; border-collapse: collapse; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
-  .files td { padding: 5px 6px; border-bottom: 1px solid #242424; color: #888; white-space: nowrap; }
-  .files td.p { width: 100%; white-space: normal; word-break: break-all; color: #ccc; }
-  .files tr.cur td.p { color: #60a5fa; }
-  .files-wrap { max-height: 200px; overflow-y: auto; }
-</style>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>D133 dataServer</title>
+<!-- Skin: tokens, fonts and component CSS from Niko1221/Strata (MIT), see web/LICENSE-Strata.txt -->
+<link rel="stylesheet" href="/web/tokens.css">
+<link rel="stylesheet" href="/web/strata-components.css">
+<link rel="stylesheet" href="/web/dashboard.css">
+<script defer src="/web/dashboard.js"></script>
 </head>
 <body>
+<header>
+  <div class="brand">D133 dataServer <span>ADAS file pull</span></div>
+  <div class="controls"><button id="theme" aria-label="Switch color theme">Light / dark</button></div>
+</header>
+<main>
+  <div class="top">
+    <div><h1>File Pull</h1><p class="sub">Pull a directory off the board and watch every file and block arrive.</p></div>
+  </div>
+  <div id="error" class="notice" role="status" hidden></div>
 
-<div class="header">
-  <h1>D133 dataServer — Pull</h1>
-  <div class="header-right" id="header-file">No transfer yet</div>
-</div>
-
-<div class="statusbar">
-  <div class="badge b-idle" id="badge">IDLE</div>
-  <div class="status-right" id="status-msg">Enter the board address and a directory, then click Pull</div>
-  <button class="btn-plain" onclick="doReset()">Reset</button>
-</div>
-
-<div class="content">
-
-  <!-- Left -->
-  <div class="left">
-    <div class="card">
-      <div class="card-title">Pull from board</div>
-      <div class="field-row">
-        <div class="field"><label for="in-board">Board IP</label><input id="in-board" value="192.168.169.1"></div>
-        <div class="field"><label for="in-port">Port</label><input id="in-port" value="9000"></div>
-      </div>
-      <div class="field"><label for="in-dir">Directory (below the board root)</label><input id="in-dir" value="log"></div>
-      <div class="file-size" id="out-dir">→ —</div>
+  <section class="panel pullbar">
+    <div class="panel-bar"><h2>Pull from board</h2><span id="outdir" class="muted small"></span></div>
+    <div class="pullform">
+      <label>Board IP<input id="board" autocomplete="off" spellcheck="false"></label>
+      <label>Port<input id="port" inputmode="numeric" autocomplete="off"></label>
+      <label class="grow">Directory below the board root<input id="dir" autocomplete="off" spellcheck="false" placeholder="log"></label>
+      <button id="pull" class="primary">Pull</button>
+      <button id="reset">Reset</button>
     </div>
-    <button class="btn-send" id="btn-send" onclick="startPull()">Pull →</button>
-    <button class="btn-reset-full" onclick="doReset()">Clear / Reset</button>
+  </section>
 
-    <div class="card">
-      <div class="card-title">Transfer Stats</div>
-      <div class="stats-mini">
-        <div class="stat-mini">
-          <div class="stat-mini-label">Blocks (current file)</div>
-          <div class="stat-mini-value" id="prog-count">0 / 0</div>
-        </div>
-        <div class="stat-mini">
-          <div class="stat-mini-label">Files</div>
-          <div class="stat-mini-value amber" id="stat-rounds">0</div>
-        </div>
-        <div class="stat-mini">
-          <div class="stat-mini-label">Average speed</div>
-          <div class="stat-mini-value green" id="stat-speed">— <small>B/s</small></div>
-        </div>
-        <div class="stat-mini">
-          <div class="stat-mini-label">Transfer time</div>
-          <div class="stat-mini-value" id="stat-time">— <small>s</small></div>
-        </div>
-      </div>
-      <div class="prog-row">
-        <span>Current file</span>
-        <span id="prog-pct">0%</span>
-      </div>
-      <div class="prog-track" style="margin-bottom:0">
-        <div class="prog-fill" id="prog-fill"></div>
-      </div>
-      <div class="verify" id="verify">Awaiting transfer...</div>
-    </div>
+  <div class="cards">
+    <div class="card"><div class="label">Status</div><div id="status-value" class="value"><span class="dot"></span><span id="status">Idle</span></div><div id="target" class="model">&nbsp;</div></div>
+    <div class="card"><div class="label">Files</div><div id="files-count" class="value">—</div><div id="files-sub" class="small">Nothing requested yet</div></div>
+    <div class="card"><div class="label">Throughput</div><div id="speed" class="value">—</div><div id="speed-sub" class="small">Peak —</div></div>
+    <div class="card"><div class="label">Received</div><div id="bytes" class="value">—</div><div id="time-sub" class="small">Average — · — s</div></div>
   </div>
 
-  <!-- Right -->
-  <div class="right">
-    <div class="card">
-      <div class="card-title">Throughput</div>
-      <div class="tp-head">
-        <div><div class="v" id="tp-now">—</div><div class="l">now</div></div>
-        <div><div class="v" id="tp-peak">—</div><div class="l">peak</div></div>
-        <div><div class="v" id="tp-total">—</div><div class="l">received</div></div>
-      </div>
-      <canvas id="tp-chart"></canvas>
-    </div>
-    <div class="card">
-      <div class="card-title">Files <span id="files-count"></span></div>
-      <div class="files-wrap"><table class="files" id="files"><tbody></tbody></table></div>
-    </div>
-    <div class="card">
-      <div class="card-title">SHA-256 of the last received file (compare with sha256sum on the source)</div>
-      <div class="ck-row">
-        <div class="ck-label">File</div>
-        <div class="ck-val" id="ck-exp">—</div>
-        <div class="ck-label">SHA-256</div>
-        <div class="ck-val" id="ck-act">—</div>
-      </div>
-    </div>
+  <section class="panel chartpanel">
+    <div class="panel-bar"><h2>Throughput</h2><span class="muted small">KB/s, sampled every 0.5 s</span></div>
+    <div class="chartbox"><svg id="chart" viewBox="0 0 1000 220" preserveAspectRatio="none" role="img" aria-label="Throughput over time"></svg>
+      <div id="chart-max" class="axis top">—</div><div class="axis bottom">0</div><div id="chart-t" class="axis right">—</div></div>
+  </section>
 
-    <div class="card">
-      <div class="card-title">
-        Blocks of the current file (block index, in arrival order)
-      </div>
-      <div class="chunk-area" id="chunk-area">
-        <span class="placeholder">No chunks received yet</span>
+  <section class="panel">
+    <div class="panel-bar"><h2>Files</h2></div>
+    <div class="workspace">
+      <div id="files" class="requests" aria-label="Received files"></div>
+      <div class="detail">
+        <div id="no-selection" class="empty"><strong>Inspect a file</strong>Files appear here as the board sends them. Select one to see its size, blocks and SHA-256.</div>
+        <div id="selection" hidden>
+          <div class="row"><div id="d-title" class="detail-title"></div><span id="d-tag" class="tag"></span></div>
+          <div class="facts">
+            <div class="fact"><span>Size</span><b id="d-size">—</b></div>
+            <div class="fact"><span>Blocks</span><b id="d-blocks">—</b></div>
+            <div class="fact"><span>Block size</span><b id="d-bs">—</b></div>
+            <div class="fact"><span>State</span><b id="d-state">—</b></div>
+          </div>
+          <div class="label" style="margin-top:6px">SHA-256 <span class="muted">(computed on this PC; the protocol has no checksum)</span></div>
+          <pre id="d-sha" class="sha"></pre>
+          <div class="label" style="margin-top:14px">Blocks in arrival order</div>
+          <div id="blocks" class="blocks"></div>
+        </div>
       </div>
     </div>
+  </section>
 
-    <div class="card" style="padding:0;overflow:hidden">
-      <div style="padding:14px 16px 10px">
-        <div class="card-title" style="margin:0">Transfer Log</div>
-      </div>
-      <div class="log" id="log">
-        <div class="placeholder">Ready. Waiting for transfer to start...</div>
-      </div>
-    </div>
-  </div>
-
-</div>
-
-<script>
-  let prevLogs = [], prevChunks = [], prevFile = null, prevFiles = -1;
-  let polling = false;
-  const badgeMap = {
-    idle:'b-idle', connecting:'b-connecting', receiving:'b-receiving',
-    success:'b-success', failed:'b-failed', error:'b-error'
-  };
-  const $ = id => document.getElementById(id);
-
-  function fmtBytes(n) {
-    if (n >= 1048576) return (n/1048576).toFixed(2) + ' MB';
-    if (n >= 1024)    return (n/1024).toFixed(1) + ' KB';
-    return n + ' bytes';
-  }
-  function fmtSpeed(n) {
-    if (!n) return '— <small>B/s</small>';
-    if (n >= 1048576) return (n/1048576).toFixed(2) + ' <small>MB/s</small>';
-    if (n >= 1024)    return (n/1024).toFixed(1) + ' <small>KB/s</small>';
-    return n + ' <small>B/s</small>';
-  }
-  function fmtSpeedText(n) {
-    if (!n) return '—';
-    return n >= 1048576 ? (n/1048576).toFixed(2) + ' MB/s' : (n/1024).toFixed(1) + ' KB/s';
-  }
-
-  fetch('/api/config').then(r => r.json()).then(c => {
-    $('in-board').value = c.board; $('in-port').value = c.port;
-    $('out-dir').textContent = '→ ' + c.out;
-  });
-
-  async function startPull() {
-    const body = { board: $('in-board').value, port: $('in-port').value, directory: $('in-dir').value };
-    if (!body.directory.trim()) { $('in-dir').focus(); return; }
-    $('btn-send').disabled = true;
-    resetView();
-    const r = await fetch('/api/pull', { method: 'POST', headers: {'Content-Type': 'application/json'},
-                                         body: JSON.stringify(body) });
-    if (!r.ok) {
-      const e = await r.json().catch(() => ({}));
-      $('status-msg').textContent = e.error || ('error ' + r.status);
-      $('btn-send').disabled = false;
-      return;
-    }
-    $('header-file').textContent = body.board + ':' + body.port + '  /  ' + body.directory;
-    polling = true;
-    poll();
-  }
-
-  async function poll() {
-    if (!polling) return;
-    try {
-      const d = await fetch('/api/status').then(r => r.json());
-      render(d);
-      const done = ['success','failed','error'].includes((d.status||'').toLowerCase());
-      if (!done) setTimeout(poll, 300);
-      else { polling = false; $('btn-send').disabled = false; }
-    } catch(e) { setTimeout(poll, 1000); }
-  }
-
-  function drawChart(hist) {
-    const c = $('tp-chart'), dpr = window.devicePixelRatio || 1;
-    const w = c.clientWidth, h = c.clientHeight;
-    c.width = w * dpr; c.height = h * dpr;
-    const g = c.getContext('2d');
-    g.scale(dpr, dpr);
-    g.clearRect(0, 0, w, h);
-    if (!hist || hist.length < 2) return;
-    const pad = 28, maxV = Math.max(...hist.map(p => p[1]), 1);
-    const t0 = hist[0][0], t1 = hist[hist.length - 1][0] || 1;
-    const x = t => pad + (w - pad - 8) * ((t - t0) / Math.max(t1 - t0, 1e-6));
-    const y = v => h - 18 - (h - 30) * (v / maxV);
-    g.strokeStyle = '#242424'; g.fillStyle = '#555'; g.font = '10px monospace';
-    for (let i = 0; i <= 2; i++) {
-      const v = maxV * i / 2, yy = y(v);
-      g.beginPath(); g.moveTo(pad, yy); g.lineTo(w - 8, yy); g.stroke();
-      g.fillText((v/1024).toFixed(0) + 'K', 2, yy + 3);
-    }
-    g.fillText((t1 - t0).toFixed(1) + ' s', w - 44, h - 4);
-    g.beginPath();
-    hist.forEach((p, i) => i ? g.lineTo(x(p[0]), y(p[1])) : g.moveTo(x(p[0]), y(p[1])));
-    g.strokeStyle = '#4ade80'; g.lineWidth = 2; g.stroke();
-    g.lineTo(x(hist[hist.length-1][0]), y(0)); g.lineTo(x(hist[0][0]), y(0)); g.closePath();
-    g.fillStyle = 'rgba(74,222,128,0.12)'; g.fill();
-  }
-
-  function render(d) {
-    const s = (d.status || 'idle').toLowerCase();
-    $('badge').className = 'badge ' + (badgeMap[s] || 'b-idle');
-    $('badge').textContent = (d.status || 'IDLE').toUpperCase();
-
-    const files = d.files || [];
-    const doneFiles = files.filter(f => f.done).length;
-    $('status-msg').textContent =
-        s === 'success'    ? `Done — ${files.length} files in ${d.transfer_time} s, saved to ${d.output_file}` :
-        s === 'failed'     ? 'Nothing received: directory empty, missing or outside the board root' :
-        s === 'error'      ? 'Transfer error — see the log' :
-        s === 'connecting' ? 'Connecting…' :
-        d.filename         ? `${doneFiles} files done — receiving ${d.filename}` :
-                             'Enter the board address and a directory, then click Pull';
-
-    const total    = d.total_chunks || 0;
-    const received = (d.chunks_received || []).length;
-    const pct = total > 0 ? Math.round((received / total) * 100) : (d.filename ? 100 : 0);
-    $('prog-fill').style.width = pct + '%';
-    $('prog-fill').className = 'prog-fill' + (s === 'success' ? ' done' : '');
-    $('prog-count').textContent = `${received} / ${total}`;
-    $('prog-pct').textContent   = pct + '%';
-    $('stat-rounds').textContent = `${doneFiles} / ${files.length}`;
-    $('stat-speed').innerHTML = fmtSpeed(d.transfer_speed);
-    $('stat-time').innerHTML  = d.transfer_time != null ? d.transfer_time + ' <small>s</small>' : '— <small>s</small>';
-
-    const vbox = $('verify');
-    if (s === 'success') {
-      vbox.className = 'verify success';
-      vbox.textContent = `✅  ${files.length} files, ${fmtBytes(d.bytes_total)} received`;
-    } else if (s === 'failed' || s === 'error') {
-      vbox.className = 'verify fail';
-      vbox.textContent = s === 'failed' ? '❌  Nothing received' : '❌  Transfer error — see log';
-    } else if (s === 'receiving') {
-      vbox.className = 'verify';
-      vbox.textContent = 'Receiving…';
-    }
-
-    // throughput
-    const hist = d.speed_history || [];
-    $('tp-now').textContent   = fmtSpeedText(d.current_speed);
-    $('tp-peak').textContent  = fmtSpeedText(hist.length ? Math.max(...hist.map(p => p[1])) : 0);
-    $('tp-total').textContent = d.bytes_total ? fmtBytes(d.bytes_total) : '—';
-    drawChart(hist);
-
-    // files table (text only: names come from the board)
-    if (files.length !== prevFiles || s !== 'receiving') {
-      const tb = $('files').tBodies[0];
-      tb.textContent = '';
-      files.forEach(f => {
-        const tr = tb.insertRow();
-        if (!f.done) tr.className = 'cur';
-        tr.insertCell().textContent = f.done ? '✓' : '…';
-        const p = tr.insertCell(); p.className = 'p'; p.textContent = f.path;
-        tr.insertCell().textContent = fmtBytes(f.size);
-      });
-      $('files-count').textContent = files.length ? `(${files.length})` : '';
-      tb.parentElement.parentElement.scrollTop = 1e9;
-      prevFiles = files.length;
-    }
-
-    const last = [...files].reverse().find(f => f.done);
-    $('ck-exp').textContent = last ? last.path : '—';
-    $('ck-act').textContent = d.actual_checksum || '—';
-    $('ck-act').className = 'ck-val' + (d.actual_checksum ? ' match' : '');
-
-    // blocks of the current file
-    const chunks = d.chunks_received || [];
-    const area = $('chunk-area');
-    if (d.filename !== prevFile) { area.textContent = ''; prevChunks = []; prevFile = d.filename; }
-    if (chunks.length !== prevChunks.length) {
-      chunks.slice(prevChunks.length).forEach(seq => {
-        const b = document.createElement('div');
-        b.className = 'chunk-box';
-        b.textContent = seq;
-        area.appendChild(b);
-      });
-      prevChunks = [...chunks];
-    }
-
-    // logs (textContent: file names come from the board)
-    const logs = d.logs || [];
-    if (logs.length !== prevLogs.length) {
-      const logEl = $('log');
-      if (prevLogs.length === 0) logEl.textContent = '';
-      logs.slice(prevLogs.length).forEach(line => {
-        const div = document.createElement('div');
-        div.className = 'log-line fresh' + (line.includes('ERROR') || line.includes('Nothing') ? ' nack-line' : '');
-        const m = line.match(/^(\[\d+:\d+:\d+\])\s+(.*)/);
-        if (m) {
-          const ts = document.createElement('span'); ts.className = 'ts'; ts.textContent = m[1];
-          div.appendChild(ts); div.appendChild(document.createTextNode(m[2]));
-        } else div.textContent = line;
-        logEl.appendChild(div);
-        setTimeout(() => div.classList.remove('fresh'), 400);
-      });
-      logEl.scrollTop = logEl.scrollHeight;
-      prevLogs = [...logs];
-    }
-  }
-
-  function resetView() {
-    prevLogs = []; prevChunks = []; prevFile = null; prevFiles = -1;
-    $('header-file').textContent = 'No transfer yet';
-    $('prog-fill').style.width = '0%';
-    $('prog-fill').className = 'prog-fill';
-    $('prog-count').textContent = '0 / 0';
-    $('prog-pct').textContent = '0%';
-    $('stat-rounds').textContent = '0';
-    $('stat-speed').innerHTML = '— <small>B/s</small>';
-    $('stat-time').innerHTML = '— <small>s</small>';
-    $('verify').className = 'verify';
-    $('verify').textContent = 'Awaiting transfer...';
-    $('ck-exp').textContent = '—';
-    $('ck-act').textContent = '—';
-    $('ck-act').className = 'ck-val';
-    $('tp-now').textContent = $('tp-peak').textContent = $('tp-total').textContent = '—';
-    $('files').tBodies[0].textContent = '';
-    $('files-count').textContent = '';
-    drawChart([]);
-    $('chunk-area').innerHTML = '<span class="placeholder">No blocks received yet</span>';
-    $('log').innerHTML = '<div class="placeholder">Ready. Waiting for transfer to start...</div>';
-    $('badge').className = 'badge b-idle';
-    $('badge').textContent = 'IDLE';
-  }
-
-  async function doReset() {
-    polling = false;
-    $('btn-send').disabled = false;
-    resetView();
-    await fetch('/api/reset', { method: 'POST' });
-  }
-  window.addEventListener('resize', () => fetch('/api/status').then(r => r.json()).then(render));
-</script>
-</body>
-</html>
+  <section class="panel" style="margin-top:18px">
+    <div class="panel-bar"><h2>Log</h2></div>
+    <pre id="log" class="logbox"></pre>
+  </section>
+  <footer><span>Listens on 127.0.0.1 only. No external requests.</span><span id="updated">Connecting…</span></footer>
+</main>
+</body></html>
