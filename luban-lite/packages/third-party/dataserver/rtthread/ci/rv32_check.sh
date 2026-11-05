@@ -38,8 +38,8 @@ fi
 scons --apply-def=$DEFCONFIG >/dev/null
 grep -q '^#define LPKG_USING_DATASERVER' rtconfig.h || { echo "dataserver not enabled"; exit 1; }
 scons -n --verbose > "$OUT/dry.txt" 2>&1
-grep -E 'dataserver/rtthread/dataserver(_rtt)?\.c' "$OUT/dry.txt" > "$OUT/cmds.txt" || true
-[ "$(wc -l < "$OUT/cmds.txt")" -eq 2 ] || { echo "compile commands not found"; tail "$OUT/dry.txt"; exit 1; }
+grep -E 'dataserver/rtthread/(dataserver|dataserver_rtt|dsstat|netmon)\.c' "$OUT/dry.txt" > "$OUT/cmds.txt" || true
+[ "$(wc -l < "$OUT/cmds.txt")" -eq 4 ] || { echo "compile commands not found"; tail "$OUT/dry.txt"; exit 1; }
 
 i=0; rc=0
 while read -r line; do
@@ -48,9 +48,9 @@ while read -r line; do
                              -e 's/-mno-dup-loop-header//' \
                              -e "s# -o [^ ]*\.o # -o $OUT/obj$i.o #")
     if eval "$cmd --specs=picolibc.specs -Wextra" > "$OUT/log$i.txt" 2>&1; then
-        n=$(grep -cE 'dataserver[a-z_]*\.c:[0-9]+:[0-9]+: (warning|error)' "$OUT/log$i.txt" || true)
+        n=$(grep -cE '(dataserver[a-z_]*|dsstat|netmon)\.c:[0-9]+:[0-9]+: (warning|error)' "$OUT/log$i.txt" || true)
         echo "object $i: ok, $n warnings in dataserver sources"
-        [ "$n" -eq 0 ] || { grep -E 'dataserver[a-z_]*\.c:' "$OUT/log$i.txt"; rc=1; }
+        [ "$n" -eq 0 ] || { grep -E '(dataserver[a-z_]*|dsstat|netmon)\.c:' "$OUT/log$i.txt"; rc=1; }
     else
         echo "object $i: FAILED"; cat "$OUT/log$i.txt"; rc=1
     fi

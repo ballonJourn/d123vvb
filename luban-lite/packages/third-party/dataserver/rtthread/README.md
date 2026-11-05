@@ -86,9 +86,54 @@ dataserver: running, port 9000, root /data/adas, 2 workers, block 4096
   queued files 0, 812 KB sent
 ```
 
+```
+aic /> netmon
+if   ip              up       rx bytes    rx pkts     tx bytes    tx pkts
+e0   192.168.1.1     yes        183402       1210       950112        822
+w1   192.168.169.1   yes        402118       3311      9120443       6551
+ip forwarded packets: 2310
+```
+
 Resource notes: 1 accept thread + `POOL_SIZE` workers + one short-lived comm
 thread per connected client, all pthreads (`PTHREAD_NUM_MAX` defaults to 8).
 Each socket and each open file uses a DFS descriptor (`DFS_FD_MAX` = 16).
+
+## Live network stats (port 9001)
+
+`dsstat.c` answers every connection on `DATASERVER_STAT_PORT` (default 9001,
+0 disables it) with one line of JSON and closes the socket:
+
+```
+$ nc 192.168.169.1 9001
+{"v":1,"uptime_ms":812345,"ifs":[{"name":"e0","ip":"192.168.1.1","up":1,"rx_bytes":183402,...},
+ {"name":"w1","ip":"192.168.169.1",...}],"ip_forwarded":2310,"dataserver":{"running":1,...}}
+```
+
+The interface counters come from `netmon.c`, which wraps each lwIP netif's
+`input` and `linkoutput` the same way RT-Thread netutils `tcpdump` does
+(Apache-2.0, header kept), but only counts: no copy, no malloc on the data
+path. Everything that crosses e0 or w1 is counted: dataServer pulls, FTP,
+iperf and packets forwarded between the Ethernet PC and the WiFi PC.
+`ip_forwarded` is lwIP's `ip.fw` counter and is `-1` unless `RT_LWIP_STATS`
+is enabled. Counters are 32-bit and wrap; the dashboard handles that.
+Cost: one RT-Thread thread (4 KB stack, no pthread slot) and one socket.
+
+## PC1 <-> PC2 through the board
+
+The defconfig already routes between e0 (192.168.1.1) and the WiFi AP
+(192.168.169.1) with `RT_LWIP_IP_FORWARD`; no NAT is needed. The SDK's
+`lwip-nat` component only hooks into lwIP 1.4.1 (`ip_nat_input/ip_nat_out`
+are called from `lwip-1.4.1/src/core/ipv4/ip.c` only), so with the default
+lwIP 2.1.2 enabling `LWIP_USING_NAT` compiles but does nothing.
+
+* WiFi PC: takes 192.168.169.x and the gateway from the board's DHCP server.
+* Ethernet PC: static 192.168.1.x and a route to the AP subnet:
+  `route add 192.168.169.0 mask 255.255.255.0 192.168.1.1` (Windows) or
+  `ip route add 192.168.169.0/24 via 192.168.1.1` (Linux).
+* Allow ping / the test port in both PCs' firewalls.
+
+Not yet verified on hardware. Check with `ping` across, then `netmon`: both
+e0 and w1 counters grow and `ip forwarded packets` grows.
 
 ## PC side
 
@@ -128,6 +173,11 @@ but not used. Upstream has no license file either: evaluation use only.
 
 ![dashboard](../dashboard/d133_dashboard.png)
 
+The **Board network** panel polls port 9001 once a second while the page is
+open and draws rx (solid) and tx (dashed) per interface, plus forwarded
+packets/s and the board-side dataServer counters. Set `DATASERVER_STAT_PORT`
+on the PC to change the default port.
+
 The protocol does not announce how many files a request contains, so the
 "Files" counter grows as files arrive.
 
@@ -143,6 +193,9 @@ make -C rtthread/host tsan
 ```
 
 `test_dashboard.py` also drives the dashboard backend (needs Flask).
+`test_dsstat.py` runs the stats endpoint of the host build (counters from
+`/proc/net/dev`), checks that a 300 kB pull shows on `lo` and in the dataServer
+counters, the uint32 wrap / reboot handling of the dashboard, and `/api/board`.
 
 Covered: block-size edge cases (0, 1, B-1, B, B+1, B/2, 2B, 7B+3, 250 kB),
 nested directories, upstream C++ client and Python client, empty/missing

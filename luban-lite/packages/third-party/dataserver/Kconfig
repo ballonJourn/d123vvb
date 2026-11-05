@@ -38,4 +38,14 @@ if LPKG_USING_DATASERVER
     config DATASERVER_AUTOSTART
         bool "Start at boot"
         default y
+
+    config DATASERVER_STAT_PORT
+        int "Live stats port for the PC dashboard (0: off)"
+        default 9001
+        help
+          One line of JSON per connection: per-interface byte/packet
+          counters of e0/w0/w1 (netmon hooks on lwIP netif input and
+          linkoutput) and the dataServer counters. Needs one RT-Thread
+          thread (4 KB stack) and one socket. Enable RT_LWIP_STATS to also
+          get the count of IP packets forwarded between e0 and w1.
 endif

@@ -3,12 +3,16 @@
  *
  *   dataserver           status
  *   dataserver start     start with the Kconfig settings
+ *   netmon               per-interface counters (netmon.c)
+ * Also starts the dsstat JSON endpoint on DATASERVER_STAT_PORT.
  */
 #ifdef DATASERVER_RTTHREAD
 
 #include <rtthread.h>
 #include <string.h>
 #include "dataserver.h"
+#include "dsstat.h"
+#include "netmon.h"
 
 #ifndef DATASERVER_PORT
 #define DATASERVER_PORT          9000
@@ -28,6 +32,9 @@
 #ifndef DATASERVER_THREAD_STACK
 #define DATASERVER_THREAD_STACK  8192
 #endif
+#ifndef DATASERVER_STAT_PORT
+#define DATASERVER_STAT_PORT     9001
+#endif
 
 static int dataserver_start_default(void)
 {
@@ -40,7 +47,14 @@ static int dataserver_start_default(void)
     cfg.block_size = DATASERVER_BLOCK_SIZE;
     cfg.root = DATASERVER_ROOT;
     cfg.thread_stack = DATASERVER_THREAD_STACK;
-    return dataserver_start(&cfg);
+    if (dataserver_start(&cfg) != 0)
+        return -1;
+#if DATASERVER_STAT_PORT > 0
+    netmon_hook_all();
+    if (dsstat_start(DATASERVER_STAT_PORT, netmon_snapshot, netmon_ip_forwarded) != 0)
+        rt_kprintf("dataserver: stats port %d not started\n", DATASERVER_STAT_PORT);
+#endif
+    return 0;
 }
 
 #ifdef DATASERVER_AUTOSTART
@@ -71,6 +85,8 @@ static int dataserver(int argc, char **argv)
                (unsigned)st.files_sent, (unsigned)st.rejected);
     rt_kprintf("  queued files %u, %u KB sent\n",
                (unsigned)st.queued, (unsigned)(st.bytes_sent / 1024));
+    rt_kprintf("  stats endpoint: %s, port %d\n",
+               dsstat_running() ? "running" : "off", DATASERVER_STAT_PORT);
     return 0;
 }
 MSH_CMD_EXPORT(dataserver, dataServer status/start (NikosMav protocol));

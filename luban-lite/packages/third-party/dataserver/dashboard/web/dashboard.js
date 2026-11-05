@@ -162,5 +162,79 @@ $("theme").onclick = () => {
 };
 $("dir").addEventListener("keydown", e => { if (e.key === "Enter") $("pull").click(); });
 
-call("/api/config").then(c => { $("board").value = c.board; $("port").value = c.port; }).catch(() => {});
-poll(); setInterval(poll, 500);
+// ── Board network panel: /api/board (client_web.py polls the board's dsstat port) ──
+const IF_COLORS = ["var(--st-info)", "var(--st-accent)", "var(--st-warn)", "var(--st-danger)", "var(--st-ink-soft)"];
+const ifColors = {};
+const ifColor = name => ifColors[name] || (ifColors[name] = IF_COLORS[Object.keys(ifColors).length % IF_COLORS.length]);
+let netStamp = "";
+
+function el(tag, cls, txt) { const e = document.createElement(tag); if (cls) e.className = cls; if (txt !== undefined) e.textContent = txt; return e; }
+
+function netCards(b) {
+  const box = $("ifcards");
+  const stamp = JSON.stringify((b.ifs || []).map(i => [i.name, i.ip, i.up, i.rx_rate, i.tx_rate, i.rx_bytes, i.tx_bytes]));
+  if (stamp === netStamp) return;
+  netStamp = stamp; box.replaceChildren();
+  if (!(b.ifs || []).length) { box.append(el("div", "small", b.ok ? "No interfaces reported." : "Waiting for the board…")); return; }
+  for (const i of b.ifs) {
+    const c = el("div", "ifcard" + (i.up ? "" : " down")); c.style.setProperty("--c", ifColor(i.name));
+    const head = el("div", "row"); head.append(el("span", "ifname", i.name), el("span", "tag " + (i.up ? "completed" : "error"), i.up ? "up" : "down"));
+    const rates = el("div", "rates"); rates.append(el("span", "", "↓ " + rate(i.rx_rate)), el("span", "", "↑ " + rate(i.tx_rate)));
+    c.append(head, el("div", "ifip", i.ip), rates,
+             el("div", "tot", "rx " + bytes(i.rx_bytes) + " / " + i.rx_pkts + " pkts · tx " + bytes(i.tx_bytes) + " / " + i.tx_pkts + " pkts"));
+    box.append(c);
+  }
+}
+
+function netChart(b) {
+  const svg = $("netchart"), NS = "http://www.w3.org/2000/svg", hist = b.history || {};
+  svg.replaceChildren();
+  for (const y of [0, 55, 110, 165, 220]) {
+    const g = document.createElementNS(NS, "line"); g.setAttribute("class", "grid");
+    g.setAttribute("x1", 0); g.setAttribute("x2", 1000); g.setAttribute("y1", y); g.setAttribute("y2", y); svg.append(g);
+  }
+  let peak = 0, t0 = Infinity, t1 = 0;
+  for (const h of Object.values(hist)) for (const p of h) { peak = Math.max(peak, p[1], p[2]); t0 = Math.min(t0, p[0]); t1 = Math.max(t1, p[0]); }
+  text("net-max", peak ? rate(peak) : "—");
+  text("net-t", t1 > t0 ? (t1 - t0).toFixed(0) + " s window" : "—");
+  const legend = $("net-legend"); legend.replaceChildren();
+  for (const name of Object.keys(hist)) {
+    const item = el("span", ""); const sw = el("i", ""); sw.style.setProperty("--c", ifColor(name));
+    item.append(sw, document.createTextNode(name + "  ↓ solid  ↑ dashed")); legend.append(item);
+  }
+  if (!peak || t1 <= t0) return;
+  for (const [name, h] of Object.entries(hist)) {
+    if (h.length < 2) continue;
+    for (const [k, cls] of [[1, "rx"], [2, "tx"]]) {
+      const pl = document.createElementNS(NS, "polyline");
+      pl.setAttribute("class", cls); pl.style.stroke = ifColor(name);
+      pl.setAttribute("points", h.map(p => (((p[0] - t0) / (t1 - t0)) * 1000).toFixed(1) + "," + (220 - (p[k] / peak) * 210).toFixed(1)).join(" "));
+      svg.append(pl);
+    }
+  }
+}
+
+function netFacts(b) {
+  const ds = b.dataserver;
+  text("n-fw", b.ip_forwarded == null ? "n/a (RT_LWIP_STATS off)" : b.ip_forwarded + " pkts" + (b.fw_rate != null ? " · " + b.fw_rate + "/s" : ""));
+  text("n-conn", ds ? ds.connections + (ds.running ? "" : " (stopped)") : "—");
+  text("n-files", ds ? ds.files_sent + " · queued " + ds.queued : "—");
+  text("n-bytes", ds ? bytes(ds.bytes_sent) : "—");
+}
+
+async function pollBoard() {
+  const host = $("board").value.trim(), sport = parseInt($("sport").value, 10) || "";
+  if (!host) return;
+  try {
+    const b = await call("/api/board?board=" + encodeURIComponent(host) + "&port=" + sport);
+    const err = $("net-error"); err.hidden = b.ok || !b.error; err.textContent = b.ok ? "" : (b.error || "");
+    text("net-target", b.target ? "→ " + b.target : "");
+    text("net-updated", b.updated ? "· board uptime " + Math.round((b.uptime_ms || 0) / 1000) + " s · " + b.updated : "");
+    netCards(b); netChart(b); netFacts(b);
+  } catch (e) { const err = $("net-error"); err.hidden = false; err.textContent = "Board stats unavailable: " + e.message; }
+}
+
+call("/api/config").then(c => {
+  $("board").value = c.board; $("port").value = c.port; $("sport").value = c.stat_port || 9001; pollBoard();
+}).catch(() => {});
+poll(); setInterval(poll, 500); setInterval(pollBoard, 1000);

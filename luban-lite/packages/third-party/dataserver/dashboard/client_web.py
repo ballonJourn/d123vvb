@@ -9,6 +9,10 @@ Adapted from MusadiqPasha/file_transfer for the D133 dataServer
     hooks fill the same shared state the upstream dashboard already polls
   - added: per-file list, live throughput history (KB/s every 0.5 s),
     SHA-256 of each received file (the protocol itself has no checksum)
+  - added: live board network panel. A poller reads the board's dsstat
+    endpoint (one JSON line per connection, port 9001, rtthread/dsstat.c)
+    every second while the page is open and turns the e0/w0/w1 counters into
+    rx/tx rates, so FTP, dataServer and e0 <-> w1 forwarding traffic show up
   - runs offline (no web fonts) and only listens on 127.0.0.1
 
     pip install flask
@@ -16,7 +20,9 @@ Adapted from MusadiqPasha/file_transfer for the D133 dataServer
 """
 
 import hashlib
+import json
 import os
+import socket
 import sys
 import threading
 import time
@@ -29,11 +35,15 @@ import remote_client  # noqa: E402
 
 DEFAULT_BOARD = os.environ.get("DATASERVER_HOST", "192.168.169.1")
 DEFAULT_PORT  = int(os.environ.get("DATASERVER_PORT", "9000"))
+STAT_PORT     = int(os.environ.get("DATASERVER_STAT_PORT", "9001"))
 FLASK_PORT    = int(os.environ.get("DASHBOARD_PORT", "5002"))
 OUT_DIR       = os.environ.get("DASHBOARD_OUT", os.path.join(HERE, "received"))
 SAMPLE_S      = 0.5          # throughput sampling period
 HISTORY_LEN   = 240          # 2 minutes of samples
 MAX_CHUNKS_UI = 2000         # boxes drawn for the current file
+BOARD_POLL_S  = 1.0          # board stats period
+BOARD_HIST    = 180          # 3 minutes of board samples
+BOARD_IDLE_S  = 10.0         # stop polling when no page asked for this long
 
 # ── Shared state ───────────────────────────────────────────────────────────────
 transfer_state = {
@@ -84,7 +94,8 @@ def web_asset(name):
 
 @app.route("/api/config")
 def api_config():
-    return jsonify({"board": DEFAULT_BOARD, "port": DEFAULT_PORT, "out": OUT_DIR})
+    return jsonify({"board": DEFAULT_BOARD, "port": DEFAULT_PORT, "stat_port": STAT_PORT,
+                    "out": OUT_DIR})
 
 @app.route("/api/pull", methods=["POST"])
 def api_pull():
@@ -117,6 +128,112 @@ def api_reset():
         speed_history=[], transfer_time=None, logs=[],
     )
     return jsonify({"ok": True})
+
+
+# ── Board network stats (dsstat endpoint) ─────────────────────────────────────
+board_state = {
+    "target":       None,     # "ip:port" of the stats endpoint
+    "ok":           False,
+    "error":        None,
+    "uptime_ms":    None,
+    "ifs":          [],       # [{name, ip, up, rx_bytes, tx_bytes, rx_pkts, tx_pkts, rx_rate, tx_rate}]
+    "history":      {},       # name -> [[t_s, rx_Bps, tx_Bps], ...]
+    "ip_forwarded": None,
+    "fw_rate":      None,     # forwarded packets / s
+    "dataserver":   None,
+    "updated":      None,
+}
+board_lock = threading.Lock()
+_board = {"thread": None, "asked": 0.0, "prev": None, "host": DEFAULT_BOARD, "port": STAT_PORT}
+
+
+def read_board_stats(host, port, timeout=2.0):
+    """One sample from the board: connect, read one JSON line, close."""
+    with socket.create_connection((host, port), timeout=timeout) as s:
+        s.settimeout(timeout)
+        data = b""
+        while not data.endswith(b"\n") and len(data) < 65536:
+            chunk = s.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+    return json.loads(data.decode("utf-8", "replace"))
+
+
+def delta32(new, old):
+    """Difference of two wrapping uint32 counters."""
+    return (int(new) - int(old)) % (1 << 32)
+
+
+def board_update(state, prev, sample):
+    """Fold one sample into state. prev is the previous sample (or None).
+    Rates use the board's own uptime, so a slow network does not skew them.
+    Returns the sample to keep as prev."""
+    t_ms = int(sample.get("uptime_ms") or 0)
+    if prev is not None and t_ms <= int(prev.get("uptime_ms") or 0):
+        prev = None                                   # board rebooted: restart
+        state["history"] = {}
+    old = {i["name"]: i for i in (prev or {}).get("ifs", [])}
+    dt = (t_ms - int(prev["uptime_ms"])) / 1000.0 if prev else 0.0
+    ifs = []
+    for i in sample.get("ifs", []):
+        row = dict(i)
+        o = old.get(i["name"])
+        if o is not None and dt > 0:
+            row["rx_rate"] = int(delta32(i["rx_bytes"], o["rx_bytes"]) / dt)
+            row["tx_rate"] = int(delta32(i["tx_bytes"], o["tx_bytes"]) / dt)
+            h = state["history"].setdefault(i["name"], [])
+            h.append([round(t_ms / 1000.0, 1), row["rx_rate"], row["tx_rate"]])
+            del h[:-BOARD_HIST]
+        else:
+            row["rx_rate"] = row["tx_rate"] = None
+        ifs.append(row)
+    fw = sample.get("ip_forwarded")
+    fw_rate = None
+    if prev is not None and dt > 0 and isinstance(fw, int) and fw >= 0 \
+            and isinstance(prev.get("ip_forwarded"), int) and prev["ip_forwarded"] >= 0:
+        fw_rate = round(delta32(fw, prev["ip_forwarded"]) / dt, 1)
+    state.update(ok=True, error=None, uptime_ms=t_ms, ifs=ifs,
+                 ip_forwarded=fw if isinstance(fw, int) and fw >= 0 else None,
+                 fw_rate=fw_rate, dataserver=sample.get("dataserver"),
+                 updated=datetime.now().strftime("%H:%M:%S"))
+    return sample
+
+
+def board_poller():
+    while time.time() - _board["asked"] < BOARD_IDLE_S:
+        host, port = _board["host"], _board["port"]
+        try:
+            sample = read_board_stats(host, port)
+            with board_lock:
+                _board["prev"] = board_update(board_state, _board["prev"], sample)
+        except Exception as e:  # noqa: BLE001  (shown in the dashboard)
+            with board_lock:
+                board_state.update(ok=False, error=f"{host}:{port}: {e}")
+                _board["prev"] = None
+        time.sleep(BOARD_POLL_S)
+    with board_lock:
+        _board["thread"] = None
+
+
+@app.route("/api/board")
+def api_board():
+    host = (request.args.get("board") or _board["host"]).strip()
+    try:
+        port = int(request.args.get("port") or _board["port"])
+    except ValueError:
+        return jsonify({"error": "bad port"}), 400
+    with board_lock:
+        if (host, port) != (_board["host"], _board["port"]):
+            _board.update(host=host, port=port, prev=None)
+            board_state.update(ok=False, error=None, ifs=[], history={},
+                               ip_forwarded=None, fw_rate=None, dataserver=None)
+        board_state["target"] = f"{host}:{port}"
+        _board["asked"] = time.time()
+        if _board["thread"] is None:
+            _board["thread"] = threading.Thread(target=board_poller, daemon=True)
+            _board["thread"].start()
+        return jsonify(json.loads(json.dumps(board_state)))
 
 
 # ── Core transfer ──────────────────────────────────────────────────────────────

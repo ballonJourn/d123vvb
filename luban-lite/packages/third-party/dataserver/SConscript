@@ -3,7 +3,8 @@
 from building import *
 
 cwd     = GetCurrentDir()
-src     = [cwd + '/rtthread/dataserver.c', cwd + '/rtthread/dataserver_rtt.c']
+src     = [cwd + '/rtthread/dataserver.c', cwd + '/rtthread/dataserver_rtt.c',
+           cwd + '/rtthread/dsstat.c', cwd + '/rtthread/netmon.c']
 CPPPATH = [cwd + '/rtthread']
 
 group = DefineGroup('dataserver', src, depend = ['LPKG_USING_DATASERVER'],

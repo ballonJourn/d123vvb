@@ -18,7 +18,7 @@ font: SIL OFL, `web/fonts/OFL.txt`). Light and dark themes.
     python client_web.py                 # http://localhost:5002
 
 Environment overrides: `DATASERVER_HOST` (default 192.168.169.1),
-`DATASERVER_PORT` (9000), `DASHBOARD_PORT` (5002), `DASHBOARD_OUT` (./received).
+`DATASERVER_PORT` (9000), `DATASERVER_STAT_PORT` (9001), `DASHBOARD_PORT` (5002), `DASHBOARD_OUT` (./received).
 
 Enter the board IP, port and a directory below the board's `DATASERVER_ROOT`
 (default `/data/adas`), then press **Pull**. Files land in `received/<dir>/...`.
@@ -33,6 +33,8 @@ Enter the board IP, port and a directory below the board's `DATASERVER_ROOT`
 | Blocks of the selected file | one box per received block |
 | SHA-256 of each file | computed on the PC after the file is written |
 | Log | connect, block size, per-file result, errors |
+| Board network: per-interface cards and rx/tx curves | board port 9001 (`rtthread/dsstat.c`), 1 s samples |
+| Board network: forwarded packets, board-side files and bytes | same JSON line |
 
 The protocol itself has no checksum. The SHA-256 is for comparing against
 `sha256sum` on the source; it does not prove the board sent the right bytes.
@@ -46,6 +48,7 @@ The protocol itself has no checksum. The SHA-256 is for comparing against
 | `/api/pull` | POST `{board, port, directory}` | start a pull (409 if one is running) |
 | `/api/status` | GET | full transfer state |
 | `/api/reset` | POST | clear state |
+| `/api/board?board=IP&port=9001` | GET | board network stats; starts a 1 s poller that stops 10 s after the page stops asking |
 
 ## Notes
 

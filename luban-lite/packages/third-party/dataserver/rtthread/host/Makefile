@@ -7,8 +7,8 @@ UPSTREAM := ../../Project2
 
 all: dataserver_c remoteClient
 
-dataserver_c: ../dataserver.c ../dataserver.h main_host.c
-	$(CC) $(CFLAGS) -o $@ ../dataserver.c main_host.c
+dataserver_c: ../dataserver.c ../dataserver.h ../dsstat.c ../dsstat.h ../netmon.h main_host.c
+	$(CC) $(CFLAGS) -o $@ ../dataserver.c ../dsstat.c main_host.c
 
 remoteClient:
 	$(MAKE) -C $(UPSTREAM) client
