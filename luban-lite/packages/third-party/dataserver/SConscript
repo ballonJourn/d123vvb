@@ -1,0 +1,12 @@
+# dataServer (C port of NikosMav/System-Programming-3). Project2/ keeps the
+# upstream C++ sources (PC side); only rtthread/ is built into the firmware.
+from building import *
+
+cwd     = GetCurrentDir()
+src     = [cwd + '/rtthread/dataserver.c', cwd + '/rtthread/dataserver_rtt.c']
+CPPPATH = [cwd + '/rtthread']
+
+group = DefineGroup('dataserver', src, depend = ['LPKG_USING_DATASERVER'],
+                    CPPPATH = CPPPATH, CPPDEFINES = ['DATASERVER_RTTHREAD'])
+
+Return('group')

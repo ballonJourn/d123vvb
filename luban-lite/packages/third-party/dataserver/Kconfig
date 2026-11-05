@@ -1,0 +1,41 @@
+# dataServer: C port of NikosMav/System-Programming-3 for RT-Thread
+menuconfig LPKG_USING_DATASERVER
+    bool "dataServer: multi-threaded file server (NikosMav/System-Programming-3 port)"
+    depends on RT_USING_POSIX_SOCKET && RT_USING_POSIX_FS && RT_USING_PTHREADS
+    default n
+    help
+      Clients request a directory below DATASERVER_ROOT and receive every
+      file in it: path, size, then the data in DATASERVER_BLOCK_SIZE blocks.
+      Compatible with the upstream remoteClient and rtthread/remote_client.py.
+
+if LPKG_USING_DATASERVER
+    config DATASERVER_PORT
+        int "TCP port"
+        default 9000
+
+    config DATASERVER_POOL_SIZE
+        int "Worker threads (-s)"
+        range 1 4
+        default 2
+
+    config DATASERVER_QUEUE_SIZE
+        int "File queue size (-q)"
+        default 16
+
+    config DATASERVER_BLOCK_SIZE
+        int "Block size in bytes (-b)"
+        range 512 16384
+        default 4096
+
+    config DATASERVER_ROOT
+        string "Root directory clients may read (-r)"
+        default "/data/adas"
+
+    config DATASERVER_THREAD_STACK
+        int "Stack size per thread"
+        default 8192
+
+    config DATASERVER_AUTOSTART
+        bool "Start at boot"
+        default y
+endif
