@@ -16,8 +16,10 @@ PC1 (board check) node server/stream/cli.mjs calibrate --to <PC2 address>:5600 -
 ```
 
 The same things from the dashboard: **D133 board → End-to-end stream**. Run the sender's dashboard on PC1:
-it shows the whole path because the receiver reports back. `server/stream/` needs only Node 20; copy that
-folder alone to PC2 if you do not want the dashboard there.
+it shows the whole path because the receiver reports back. The command line tool needs only Node 20 and
+two things from this folder, kept at the same relative paths: `server/stream/` and `server/d133.mjs`
+(`calibrate` reads the board through it). Copy just those to PC2 if you do not want the dashboard there;
+no `npm install` is needed.
 
 No board at hand? `node server/stream/sim/demo.mjs --to 5600 --cable 0.02 --d133 0.08 --wifi 0.03` starts a
 simulated path and a simulated board stats port; point the dashboard's Board IP at 127.0.0.1 and its Stats
