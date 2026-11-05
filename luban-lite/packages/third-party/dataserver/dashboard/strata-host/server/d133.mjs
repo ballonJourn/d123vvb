@@ -70,6 +70,13 @@ export async function readBoardStats(host, port, timeoutMs = 2000) {
   });
 }
 
+/** Per-interface series kept in history.ifs[name], and the row field each one is taken from. */
+const IF_SERIES = [['rx', 'rx_rate'], ['tx', 'tx_rate'], ['rx_pps', 'rx_pps'], ['tx_pps', 'tx_pps'], ['rx_drop', 'rx_drop_rate'], ['tx_err', 'tx_err_rate']];
+/** lwIP counters that only go up; their per-second rates are what shows a queue running out. */
+export const LWIP_COUNTERS = ['ip_drop', 'ip_rterr', 'ip_chkerr', 'ip_lenerr', 'ip_memerr', 'link_drop', 'link_memerr', 'link_chkerr', 'link_lenerr', 'pbuf_err', 'inpkt_err'];
+const finite = v => typeof v === 'number' && Number.isFinite(v);
+const perSecond = (cur, old, dt) => finite(cur) && finite(old) ? delta32(cur, old) / dt : null;
+
 /** Fold one sample into state; rates use the board's own uptime. Returns the sample to keep. */
 export function boardUpdate(state, prev, sample) {
   const t = Number(sample.uptime_ms ?? 0);
@@ -78,30 +85,33 @@ export function boardUpdate(state, prev, sample) {
   const dt = prev ? (t - Number(prev.uptime_ms)) / 1000 : 0;
   if (prev && dt > 0) state.history.t.push(t);
   state.ifs = (sample.ifs ?? []).map(i => {
-    const o = old.get(i.name), row = { ...i, rx_rate: null, tx_rate: null };
+    const o = old.get(i.name), row = { ...i, rx_rate: null, tx_rate: null, rx_pps: null, tx_pps: null, rx_drop_rate: null, tx_err_rate: null };
     if (o && dt > 0) {
-      row.rx_rate = delta32(i.rx_bytes, o.rx_bytes) / dt;
-      row.tx_rate = delta32(i.tx_bytes, o.tx_bytes) / dt;
+      row.rx_rate = perSecond(i.rx_bytes, o.rx_bytes, dt); row.tx_rate = perSecond(i.tx_bytes, o.tx_bytes, dt);
+      row.rx_pps = perSecond(i.rx_pkts, o.rx_pkts, dt); row.tx_pps = perSecond(i.tx_pkts, o.tx_pkts, dt);
+      row.rx_drop_rate = perSecond(i.rx_drop, o.rx_drop, dt); row.tx_err_rate = perSecond(i.tx_err, o.tx_err, dt);
     }
     return row;
   });
   if (prev && dt > 0) {
     // every series stays aligned with history.t; an interface that appears late is padded with gaps
-    const n = state.history.t.length;
+    const n = state.history.t.length, blank = () => Object.fromEntries(IF_SERIES.map(([k]) => [k, []]));
     for (const row of state.ifs) {
-      const h = state.history.ifs[row.name] ??= { rx: [], tx: [] };
-      while (h.rx.length < n - 1) { h.rx.push(null); h.tx.push(null); }
-      h.rx.push(row.rx_rate); h.tx.push(row.tx_rate);
+      const h = state.history.ifs[row.name] ??= blank();
+      for (const [k, field] of IF_SERIES) { while (h[k].length < n - 1) h[k].push(null); h[k].push(row[field]); }
     }
-    for (const h of Object.values(state.history.ifs)) while (h.rx.length < n) { h.rx.push(null); h.tx.push(null); }
+    for (const h of Object.values(state.history.ifs)) for (const [k] of IF_SERIES) while (h[k].length < n) h[k].push(null);
     if (n > HISTORY) {
       state.history.t.splice(0, n - HISTORY);
-      for (const h of Object.values(state.history.ifs)) { h.rx.splice(0, n - HISTORY); h.tx.splice(0, n - HISTORY); }
+      for (const h of Object.values(state.history.ifs)) for (const [k] of IF_SERIES) h[k].splice(0, n - HISTORY);
     }
   }
   const fw = sample.ip_forwarded, pfw = prev?.ip_forwarded;
   state.ipForwarded = Number.isInteger(fw) && fw >= 0 ? fw : null;
   state.fwRate = prev && dt > 0 && state.ipForwarded !== null && Number.isInteger(pfw) && pfw >= 0 ? delta32(fw, pfw) / dt : null;
+  // lwIP drop counters and the limits they are read against (null on a board built without RT_LWIP_STATS / an older firmware)
+  const lw = sample.lwip;
+  state.lwip = lw ? { ...lw, rates: Object.fromEntries(LWIP_COUNTERS.map(k => [k, lw.stats && prev?.lwip?.stats && dt > 0 ? perSecond(lw[k], prev.lwip[k], dt) : null])) } : null;
   Object.assign(state, { ok: true, error: null, uptimeMs: t, dataserver: sample.dataserver ?? null, updated: Date.now() });
   return sample;
 }
@@ -197,6 +207,8 @@ export function createD133({ host = '192.168.169.1', dataPort = 9000, statPort =
   return {
     config: () => ({ host, dataPort, statPort, outDir }),
     board,
+    /** The newest board sample the dashboard already fetched (no new request), or null. */
+    boardPeek: (h = host, p = statPort) => boards.get(`${h}:${p}`)?.state ?? null,
     pullState: () => ({ ...pull, files: pull.files.map(({ local, ...f }) => ({ ...f, blocksShown: Math.min(f.nblocks, MAX_BLOCKS_UI) })) }),
     startPull(h = host, p = dataPort, directory = '') {
       if (!directory.trim()) return { error: 'directory required', status: 400 };

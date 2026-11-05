@@ -84,6 +84,7 @@ import { findFreePort, listenProblem } from './ports.mjs';
 import { validateChatImages } from './chat-images.mjs';
 import { createTimeSkip, measureFolder, timeskipRevisionMessage, imageTypeOf } from './timeskip.mjs';
 import { createD133 } from './d133.mjs';   // D133: board network stats + dataServer pulls
+import { createStreamEngine } from './stream/engine.mjs';   // D133: UDP stream sender/receiver and where the path loses datagrams
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -957,6 +958,8 @@ const d133 = createD133({
   statPort: Number(process.env.DATASERVER_STAT_PORT ?? 9001),
   outDir: resolve(process.env.DASHBOARD_OUT ?? join(process.env.USERPROFILE ?? process.env.HOME ?? homedir(), 'Downloads', 'd133-pull')),
 });
+// The board interfaces a stream passes: PC1 on the Ethernet port (e0), PC2 on the WiFi AP (w1).
+const d133stream = createStreamEngine({ peekBoard: () => d133.boardPeek(), ingressIf: process.env.D133_INGRESS_IF ?? 'e0', egressIf: process.env.D133_EGRESS_IF ?? 'w1' });
 await cloudflare.inspect();
 
 /* --------------------------------------------------------------- routing --- */
@@ -1635,6 +1638,12 @@ async function api(req, res, path, method, url) {
     return r.error ? error(res, r.status, r.error) : json(res, 200, r);
   }
   if (path === '/api/d133/pull/reset' && method === 'POST') return json(res, 200, d133.resetPull());
+  if (path === '/api/d133/stream' && method === 'GET') return json(res, 200, d133stream.state());
+  if (path === '/api/d133/stream/start' && method === 'POST') {
+    try { return json(res, 200, d133stream.start(await readBody(req))); }
+    catch (e) { return error(res, e.status ?? 500, e.message); }
+  }
+  if (path === '/api/d133/stream/stop' && method === 'POST') return json(res, 200, d133stream.stop());
 
   // --- monitor ------------------------------------------------------------
   if (path === '/api/monitor') { monitor.watch(); return json(res, 200, monitor.snapshot()); }
@@ -2314,6 +2323,7 @@ server.listen(PORT, HOST, () => {
 let stopping=false;
 const shutdown = async () => {
   if(stopping)return;stopping=true;
+  d133stream.stop();
   clearInterval(taskTimer);tasks.close();
   const timeout=setTimeout(()=>process.exit(0),control?45000:10000);timeout.unref();   // stopping an engine through Control: drained (15 s), then ended; the shell's deadline is longer
   server.close();server.closeAllConnections?.();

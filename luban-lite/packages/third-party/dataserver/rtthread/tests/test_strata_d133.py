@@ -55,7 +55,8 @@ console.log(JSON.stringify({first, rx:s.ifs[0].rx_rate, tx:s.ifs[0].tx_rate, fw:
         self.assertEqual(out["rx"], 2000)          # 4000 bytes over 2 s, across the wrap
         self.assertEqual(out["tx"], 1000)
         self.assertEqual(out["fw"], 10)            # 20 packets over 2 s, across the wrap
-        self.assertEqual(out["h"], {"t": [3000], "ifs": {"w1": {"rx": [2000], "tx": [1000]}}})
+        series = {"rx": [2000], "tx": [1000], "rx_pps": [None], "tx_pps": [None], "rx_drop": [None], "tx_err": [None]}
+        self.assertEqual(out["h"], {"t": [3000], "ifs": {"w1": series}})   # packet and drop series are null: this sample has no such fields
 
     def test_reboot_and_late_interface(self):
         out = node_eval("""
@@ -201,6 +202,40 @@ class StrataApiTest(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as cm:
             self.get("/api/d133/board?port=abc")
         self.assertEqual(cm.exception.code, 400)
+
+    # ---- /api/d133/stream (server/stream/engine.mjs) -------------------------------------------
+    def test_7_stream_idle_and_validation(self):
+        st = self.get("/api/d133/stream")
+        self.assertEqual(st["role"], "idle"); self.assertIsNone(st["stats"]); self.assertIsNone(st["path"])
+        for body, word in (({}, "role"), ({"role": "send", "port": 5600}, "host"), ({"role": "send", "host": "1.2.3.4", "port": 70000}, "port"),
+                           ({"role": "recv", "port": 0}, "port")):
+            code, r = self.post("/api/d133/stream/start", body)
+            self.assertEqual(code, 400, body); self.assertIn(word, r["error"])
+
+    def test_8_stream_receiver_and_sender_through_the_api(self):
+        rport = free_port()
+        code, st = self.post("/api/d133/stream/start", {"role": "recv", "port": rport, "reportMs": 100})
+        self.assertEqual(code, 200); self.assertEqual(st["role"], "recv")
+        code, r = self.post("/api/d133/stream/start", {"role": "recv", "port": rport})
+        self.assertEqual(code, 409); self.assertIn("already running", r["error"])
+        # a sender is a second run: stop the receiver, then send to nobody; the numbers must still be coherent
+        self.post("/api/d133/stream/stop", {})
+        code, st = self.post("/api/d133/stream/start", {"role": "send", "host": "127.0.0.1", "port": rport, "bitrate": 1e6})
+        self.assertEqual(code, 200); self.assertEqual(st["role"], "send")
+        time.sleep(1.5)
+        st = self.get("/api/d133/stream")
+        self.assertEqual(st["stats"]["role"], "send"); self.assertGreater(st["stats"]["txPackets"], 20)
+        self.assertEqual(st["path"]["located"]["where"], None)                         # no receiver answering: nothing can be located
+        self.assertEqual(self.post("/api/d133/stream/stop", {})[1]["role"], "idle")
+
+    def test_9_stream_controls_refuse_other_sites(self):
+        for path, body in (("/api/d133/stream/start", {"role": "recv", "port": free_port()}), ("/api/d133/stream/stop", {})):
+            req = urllib.request.Request(self.base + path, data=json.dumps(body).encode(), method="POST",
+                                         headers={"Content-Type": "application/json", "Origin": "http://evil.example"})
+            with self.assertRaises(urllib.error.HTTPError) as cm:
+                urllib.request.urlopen(req, timeout=5)
+            self.assertEqual(cm.exception.code, 403)
+        self.assertEqual(self.get("/api/d133/stream")["role"], "idle")                  # and nothing was started
 
 
 if __name__ == "__main__":

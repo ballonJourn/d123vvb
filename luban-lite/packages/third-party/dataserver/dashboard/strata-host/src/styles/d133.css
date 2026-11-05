@@ -7,3 +7,24 @@
 .d133-current { display: grid; gap: var(--st-s-2); margin: var(--st-s-3) 0; }
 .d133-log { margin: var(--st-s-3) 0 0; max-height: 260px; overflow: auto; font: var(--st-fs-xs)/1.6 var(--st-font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 1100px) { .d133-form { grid-template-columns: 1fr 1fr; } .d133-form__actions { grid-column: 1 / -1; } }
+
+/* ---- end-to-end stream (screens/D133Stream.tsx), lwIP panel (D133Lwip.tsx) ---- */
+.d133-form--board { grid-template-columns: minmax(150px,1.2fr) minmax(90px,.6fr); max-width: 520px; }
+.d133-form--pull { grid-template-columns: minmax(90px,.6fr) minmax(200px,2fr) auto; }
+.d133-batch-metric { grid-template-columns: minmax(0,1fr); max-width: 520px; margin: var(--st-s-3) 0; }
+.d133-stream-form { display: flex; flex-wrap: wrap; gap: var(--st-s-3); align-items: flex-end; margin-top: var(--st-s-3); }
+.d133-stream-form .input-field { margin: 0; flex: 1 1 150px; max-width: 260px; min-width: 120px; }
+.d133-stream-form .st-input { width: 100%; font-family: var(--st-font-mono); }
+.d133-stream-form .d133-form__actions { flex: 0 0 auto; }
+.d133-seg-control { display: flex; gap: var(--st-s-2); }
+.d133-path { display: flex; align-items: stretch; flex-wrap: wrap; gap: 0; margin: var(--st-s-3) 0; }
+.d133-node { flex: 1 1 130px; min-width: 130px; padding: var(--st-s-3); border: 1px solid var(--st-line); border-radius: var(--st-r-md); background: var(--st-surface-2); }
+.d133-node__value { font-size: var(--st-fs-lg); font-weight: var(--st-fw-medium); }
+.d133-seg { flex: 0 0 82px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; color: var(--st-ink-muted); font-size: var(--st-fs-xs); text-align: center; }
+.d133-seg__line { display: block; width: 100%; height: 2px; background: currentColor; opacity: .5; }
+.d133-seg[data-state='ok'] { color: var(--st-accent-text); }
+.d133-seg[data-state='loss'] { color: var(--st-danger-text); font-weight: var(--st-fw-medium); }
+.d133-seg[data-state='loss'] .d133-seg__line { height: 3px; opacity: 1; }
+.d133-pools { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--st-s-4); margin: var(--st-s-3) 0; }
+.d133-pool { display: grid; gap: var(--st-s-2); align-content: start; }
+@media (max-width: 1100px) { .d133-pools { grid-template-columns: 1fr; } .d133-seg { flex-basis: 64px; } }

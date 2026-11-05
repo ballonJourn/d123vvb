@@ -45,3 +45,28 @@ jobs:
       - name: Compile board sources with the Luban-Lite flags and rtconfig.h
         working-directory: luban-lite
         run: sh packages/third-party/dataserver/rtthread/ci/rv32_check.sh
+
+  stream-and-dashboard:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: luban-lite/packages/third-party/dataserver
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Stream library tests (protocol, receiver, sender, adaptation, ramp, loss location, calibration, CLI)
+        working-directory: luban-lite/packages/third-party/dataserver/dashboard/strata-host
+        run: node --test server/stream/test/*.test.mjs
+      - name: Build and typecheck the dashboard
+        working-directory: luban-lite/packages/third-party/dataserver/dashboard/strata-host
+        run: |
+          npm ci
+          npx tsc --noEmit
+          npm run build
+      - name: Dashboard API tests against the host build of the board server
+        run: |
+          pip install -r dashboard/requirements.txt
+          make -C rtthread/host dataserver_c test_format
+          python3 -m unittest discover -s rtthread/tests -v
