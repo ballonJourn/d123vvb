@@ -18,6 +18,7 @@ import { ChatScreen } from '../screens/Chat';
 import { ModelRunScreen } from '../screens/ModelRun';
 import { ServingScreen } from '../screens/Serving';
 import { MonitorScreen } from '../screens/Monitor';
+import { D133BoardScreen } from '../screens/D133Board';
 import { TasksScreen } from '../screens/Tasks';
 import { SkillsScreen } from '../screens/Skills';
 import { SettingsScreen } from '../screens/Settings';
@@ -47,7 +48,8 @@ function AppShell() {
     // First run is a modal over the working shell rather than a takeover: the app
     // is visibly there behind it, which is far less daunting than a blank window
     // demanding five steps before anything appears.
-    const setupOpen = location.route === 'setup' || (!!setup && !setup.complete && !setup.dismissed) || firstRunOpen;
+    // D133: the board screen needs no model setup, so the first-run flow only opens on request (#/setup).
+    const setupOpen = location.route === 'setup' || (location.route !== 'board' && !!setup && !setup.complete && !setup.dismissed) || firstRunOpen;
     // Hook runs here, after setupOpen exists — see src/lib/focus.ts.
     useSurfaceFocus(setupOpen, setupRef);
     return (<div className="app" data-rail={compact ? !navOpen : rail} data-layout={mobile ? 'mobile' : compact ? 'compact' : 'desktop'} data-nav-open={navOpen || undefined} data-focus={focus && location.route === 'chat' || undefined}>
@@ -166,6 +168,8 @@ function RouteView({ route }: {
             return <ModelRunScreen />;
         case 'serving':
             return <ServingScreen />;
+        case 'board':
+            return <D133BoardScreen />;
         case 'monitor':
             return <MonitorScreen />;
         case 'tasks':

@@ -83,6 +83,7 @@ import { apiPath } from './api-paths.mjs';
 import { findFreePort, listenProblem } from './ports.mjs';
 import { validateChatImages } from './chat-images.mjs';
 import { createTimeSkip, measureFolder, timeskipRevisionMessage, imageTypeOf } from './timeskip.mjs';
+import { createD133 } from './d133.mjs';   // D133: board network stats + dataServer pulls
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -949,6 +950,13 @@ const tunnelPort = await findFreePort(Number(process.env.STRATA_TUNNEL_PORT ?? P
 const tunnelOrigin = createLocalShare({ handle: openai, hasKey: () => !!store.get().serving?.apiKey, host: '127.0.0.1', port: tunnelPort });
 const connector = createConnectorInstaller({ directory: join(store.HOME, 'engine', 'cloudflare'), componentDirectory: join(componentsDirectory(), 'cloudflared') });
 const cloudflare = createCloudflare({ origin: tunnelOrigin, originUrl: `http://127.0.0.1:${tunnelPort}`, hasKey: () => !!store.get().serving?.apiKey, changed: serving.setTunnel, locate: connector.locate, prepareConnector: connector.ensure, connectorInfo: connector.connector, findRunning: findRunningConnector });
+// D133: the board's WiFi AP address and the dataserver/dsstat ports (Kconfig defaults); pulls land in DASHBOARD_OUT.
+const d133 = createD133({
+  host: process.env.DATASERVER_HOST ?? '192.168.169.1',
+  dataPort: Number(process.env.DATASERVER_PORT ?? 9000),
+  statPort: Number(process.env.DATASERVER_STAT_PORT ?? 9001),
+  outDir: resolve(process.env.DASHBOARD_OUT ?? join(process.env.USERPROFILE ?? process.env.HOME ?? homedir(), 'Downloads', 'd133-pull')),
+});
 await cloudflare.inspect();
 
 /* --------------------------------------------------------------- routing --- */
@@ -1612,6 +1620,21 @@ async function api(req, res, path, method, url) {
   }
   const cancelMatch = /^\/api\/serving\/requests\/([^/]+)\/cancel$/.exec(path);
   if (cancelMatch && method === 'POST') return json(res, 200, serving.cancel(cancelMatch[1]));
+
+  // --- D133 board (server/d133.mjs) ------------------------------------------
+  if (path === '/api/d133/config' && method === 'GET') return json(res, 200, d133.config());
+  if (path === '/api/d133/board' && method === 'GET') {
+    const port = Number(url.searchParams.get('port') || d133.config().statPort);
+    if (!Number.isInteger(port) || port <= 0 || port > 65535) return error(res, 400, 'bad port');
+    return json(res, 200, await d133.board(url.searchParams.get('host') || d133.config().host, port));
+  }
+  if (path === '/api/d133/pull' && method === 'GET') return json(res, 200, d133.pullState());
+  if (path === '/api/d133/pull' && method === 'POST') {
+    const body = await readBody(req);
+    const r = d133.startPull(String(body.host || d133.config().host), Number(body.port || d133.config().dataPort), String(body.directory ?? ''));
+    return r.error ? error(res, r.status, r.error) : json(res, 200, r);
+  }
+  if (path === '/api/d133/pull/reset' && method === 'POST') return json(res, 200, d133.resetPull());
 
   // --- monitor ------------------------------------------------------------
   if (path === '/api/monitor') { monitor.watch(); return json(res, 200, monitor.snapshot()); }

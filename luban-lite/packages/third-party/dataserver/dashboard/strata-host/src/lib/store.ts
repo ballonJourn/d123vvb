@@ -58,7 +58,7 @@ import type {
   WorkspaceFile,
   ToolDraft,
 } from './types';
-import { navigate, type Route } from './router';
+import { navigate, parseLocation, type Route } from './router';
 import { estimate, execution, contextTokens } from './experience';
 
 export interface Toast {
@@ -894,7 +894,9 @@ export async function bootstrap() {
       }
       set({ connection: status });
     });
-    if (!setup.complete && !setup.dismissed && !window.location.hash.includes('setup')) navigate('setup');
+    // D133: the board screen (the landing screen) needs no model setup; the first-run flow stays one click away (#/setup).
+    const onBoard = parseLocation(window.location.hash).route === 'board';
+    if (!onBoard && !setup.complete && !setup.dismissed && !window.location.hash.includes('setup')) navigate('setup');
   } catch (err) {
     set({ ready: true, connection: 'offline' });
     pushToast(

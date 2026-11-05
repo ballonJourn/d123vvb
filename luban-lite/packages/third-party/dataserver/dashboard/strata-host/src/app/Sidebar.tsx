@@ -110,6 +110,7 @@ export function Sidebar({ containerRef }: {
       </div>
       <div className="nav__foot">
         <button className="enginechip" data-state={status === 'Ready' ? 'ready' : ['Reading prompt', 'Thinking', 'Generating', 'Loading'].includes(status) ? 'busy' : 'off'} onClick={() => go('models')} title={tr("{0} \u00B7 {1} \u00B7 {2}", [modelName, workingLine ?? modelQuant, tr(status)])} aria-label={tr("{0} \u00B7 {1}", [modelName, modelQuant])}><span className="enginechip__family"><Icon name={modelFamilyIcon(current?.family)} size={20}/><span className="enginechip__dot"/></span><span className="enginechip__text nav__rail-hide"><span className="enginechip__title">{modelName}</span><span className="enginechip__sub">{workingLine ?? modelQuant}</span></span></button>
+        <NavLink route="board" label={tr("D133 board")} icon="link" current={location.route}/>
         <NavLink route="skills" label={tr("Skills")} icon="skills" current={location.route}/>
         <NavLink route="monitor" label={tr("Monitor")} icon="activity" current={location.route}/>
         <NavLink route="models" label={tr("Models")} icon="models" current={location.route === 'tuning' ? 'models' : location.route}/>

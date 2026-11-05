@@ -1,0 +1,9 @@
+/* D133 board screen (screens/D133Board.tsx): only the pull form, the current-file
+   bar and the log are new; cards, metrics, charts and tables are the Monitor's. */
+.d133-form { display: grid; grid-template-columns: minmax(150px,1.2fr) minmax(90px,.6fr) minmax(90px,.6fr) minmax(200px,2fr) auto; gap: var(--st-s-3); align-items: end; margin-top: var(--st-s-3); }
+.d133-form .input-field { margin: 0; }
+.d133-form .st-input { width: 100%; font-family: var(--st-font-mono); }
+.d133-form__actions { display: flex; gap: var(--st-s-2); padding-bottom: 2px; }
+.d133-current { display: grid; gap: var(--st-s-2); margin: var(--st-s-3) 0; }
+.d133-log { margin: var(--st-s-3) 0 0; max-height: 260px; overflow: auto; font: var(--st-fs-xs)/1.6 var(--st-font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 1100px) { .d133-form { grid-template-columns: 1fr 1fr; } .d133-form__actions { grid-column: 1 / -1; } }

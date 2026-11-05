@@ -6,3 +6,6 @@ node_modules/
 tmp/
 .env*
 .DS_Store
+
+# D133: build output (npm run build)
+dist/

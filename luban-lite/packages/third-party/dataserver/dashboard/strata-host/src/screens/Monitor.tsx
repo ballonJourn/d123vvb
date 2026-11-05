@@ -30,7 +30,8 @@ function ReadingBar({ label, value, tone = 'accent' }: {
 }) {
     return hasReading(value) ? <Bar label={tr(label)} value={value} tone={tone}/> : <div className="st-progress" role="img" aria-label={tr("{0}: unavailable", [label])}/>;
 }
-function MonitorMetric({ label, icon, value, unit, sub, chart, source, secondary }: {
+/** Exported for the D133 board screen (screens/D133Board.tsx). */
+export function MonitorMetric({ label, icon, value, unit, sub, chart, source, secondary }: {
     label: string;
     icon: IconName;
     value: ReactNode;

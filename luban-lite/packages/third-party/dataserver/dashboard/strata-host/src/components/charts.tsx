@@ -2,7 +2,7 @@ import { tr } from '../lib/i18n';
 import { useState } from 'react';
 import { referencePaths } from '../lib/monitor-chart';
 /** Original Monitor chart geometry, including the separate prefill line and sensor gaps. */
-export function ReferenceSpark({ data, maximum, tone = 'var(--st-accent)', secondary, label, unit, timestamps }: {
+export function ReferenceSpark({ data, maximum, tone = 'var(--st-accent)', secondary, label, unit, timestamps, primaryLabel = 'Decode' }: {
     data: (number | null | undefined)[];
     maximum?: number;
     tone?: string;
@@ -14,6 +14,8 @@ export function ReferenceSpark({ data, maximum, tone = 'var(--st-accent)', secon
     label: string;
     unit: string;
     timestamps: number[];
+    /** D133: name of the primary series in the hover readout (upstream always says Decode). */
+    primaryLabel?: string;
 }) {
     const [hover, setHover] = useState<number | null>(null);
     const primary = referencePaths(data, maximum), other = secondary ? referencePaths(secondary.data) : null;
@@ -36,7 +38,7 @@ export function ReferenceSpark({ data, maximum, tone = 'var(--st-accent)', secon
       {tr(line(primary.paths, tone))}{tr(other && secondary ? line(other.paths, secondary.tone) : null)}
       {tr(hover !== null && data.length > 1 ? <line x1={hover / (data.length - 1) * 100} x2={hover / (data.length - 1) * 100} y1="2" y2="32" stroke={tone} strokeWidth="1" opacity=".45" vectorEffect="non-scaling-stroke"/> : null)}
     </svg>
-    {tr(hover !== null ? <span className="spark__readout num" role="status">{tr(secondary ? 'Decode: ' : '')}{tr(value(data))}{tr(secondary ? ` · ${secondary.label}: ${value(secondary.data)}` : '')}<span className="spark__ago"> · {tr(ago ? `${ago}s ago` : 'now')}</span></span> : null)}
+    {tr(hover !== null ? <span className="spark__readout num" role="status">{tr(secondary ? `${primaryLabel}: ` : '')}{tr(value(data))}{tr(secondary ? ` · ${secondary.label}: ${value(secondary.data)}` : '')}<span className="spark__ago"> · {tr(ago ? `${ago}s ago` : 'now')}</span></span> : null)}
   </div>;
 }
 /**

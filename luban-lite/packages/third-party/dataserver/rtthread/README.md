@@ -155,31 +155,45 @@ Files land in `results/<dir>/...` (or `-o`).
 
 ## Live dashboard (PC)
 
-`../dashboard/` is [MusadiqPasha/file_transfer](https://github.com/MusadiqPasha/file_transfer)
-(imported with `git subtree`, history kept) adapted to this protocol: the
-browser asks the board for a directory and shows, while it arrives, the live
-throughput curve, the file list, the blocks of the current file, the SHA-256
-of every received file and the transfer log. It runs offline.
+`../dashboard/strata-host/` is the web shell of
+[Niko1221/Strata](https://github.com/Niko1221/Strata) (`apps/host`, MIT),
+imported whole and built with its own toolchain, with a **D133 board** screen
+added in Strata's Monitor style (`MonitorMetric` cards, `ReferenceSpark`
+charts, `st-table`). It opens on that screen and shows:
+
+* per interface (e0, w0, w1): rx/tx rate, received (line) and sent (second line)
+  history, bytes and packets, from the board's stats port 9001;
+* forwarded e0 <-> w1 packets/s (`RT_LWIP_STATS`);
+* the board-side dataServer counters;
+* pulls: throughput history, current file blocks, every file with its SHA-256,
+  and the log.
 
 ```
-pip install -r ../dashboard/requirements.txt
-python ../dashboard/client_web.py          # then open http://localhost:5002
+cd ../dashboard/strata-host
+npm ci && npm run build          # Node >= 24.12 (22 builds with a warning)
+npm run serve                    # then open http://127.0.0.1:8791
 ```
 
 Environment variables: `DATASERVER_HOST` (default 192.168.169.1),
-`DATASERVER_PORT` (9000), `DASHBOARD_OUT` (download directory),
-`DASHBOARD_PORT` (5002). The upstream `server.py` / `server_ui.html` are kept
-but not used. Upstream has no license file either: evaluation use only.
+`DATASERVER_PORT` (9000), `DATASERVER_STAT_PORT` (9001), `DASHBOARD_OUT`
+(download directory, default `~/Downloads/d133-pull`), `STRATA_PORT` (8791).
+The changes to upstream are listed in `../dashboard/strata-host/D133-CHANGES.md`.
 
-![dashboard](../dashboard/d133_dashboard.png)
+![D133 board screen](../dashboard/strata-host/d133_board.png)
 
-The **Board network** panel polls port 9001 once a second while the page is
-open and draws rx (solid) and tx (dashed) per interface, plus forwarded
-packets/s and the board-side dataServer counters. Set `DATASERVER_STAT_PORT`
-on the PC to change the default port.
+The screenshot is the host build of the board code (interfaces `lo`, `eth0`);
+on the board the cards are `Ethernet e0` and `WiFi w1`.
 
-The protocol does not announce how many files a request contains, so the
-"Files" counter grows as files arrive.
+The older Flask page (`../dashboard/client_web.py`, MusadiqPasha/file_transfer
+adapted to this protocol) still works for pulls without Node:
+
+```
+pip install -r ../dashboard/requirements.txt
+python ../dashboard/client_web.py          # http://localhost:5002
+```
+
+The protocol does not announce how many files a request contains, so file
+counters grow as files arrive.
 
 ## Tests
 
@@ -194,8 +208,11 @@ make -C rtthread/host tsan
 
 `test_dashboard.py` also drives the dashboard backend (needs Flask).
 `test_dsstat.py` runs the stats endpoint of the host build (counters from
-`/proc/net/dev`), checks that a 300 kB pull shows on `lo` and in the dataServer
-counters, the uint32 wrap / reboot handling of the dashboard, and `/api/board`.
+`/proc/net/dev`) and checks that a 300 kB pull shows on `lo` and in the
+dataServer counters. `test_strata_d133.py` drives the Strata back end
+(`server/d133.mjs`): rate maths with uint32 wrap, reboot and late interfaces,
+pulls with SHA-256 checks, busy/bad/missing requests, unreachable board; it
+needs Node and `npm run build`, and is skipped otherwise.
 
 Covered: block-size edge cases (0, 1, B-1, B, B+1, B/2, 2B, 7B+3, 250 kB),
 nested directories, upstream C++ client and Python client, empty/missing

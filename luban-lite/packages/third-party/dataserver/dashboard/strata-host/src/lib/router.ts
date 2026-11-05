@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 
 export const ROUTES = [
+  'board',   // D133: board network + dataServer pulls (screens/D133Board.tsx)
   'setup',
   'chat',
   'models',
@@ -26,9 +27,9 @@ export function parseLocation(hash: string): Location {
   const [pathPart, queryPart] = raw.split('?');
   const segments = pathPart.split('/').filter(Boolean);
   const first = segments[0] as Route | undefined;
-  // Chat is the landing screen; an unknown or retired route (a stale #/launch
-  // bookmark) falls back to it rather than rendering nothing.
-  const route: Route = first && (ROUTES as readonly string[]).includes(first) ? first : 'chat';
+  // D133: the board screen is the landing screen; an unknown or retired route
+  // (a stale #/launch bookmark) falls back to it rather than rendering nothing.
+  const route: Route = first && (ROUTES as readonly string[]).includes(first) ? first : 'board';
   const query = new URLSearchParams(queryPart ?? '');
   if (route === 'settings') query.set('settings', '1');
   return {
