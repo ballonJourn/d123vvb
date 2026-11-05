@@ -1,3 +1,4 @@
 host/dataserver_c
 host/remoteClient
 __pycache__/
+*.o
