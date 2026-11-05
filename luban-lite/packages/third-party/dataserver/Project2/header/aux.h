@@ -64,10 +64,20 @@ bool is_busy(q_node*, int* , int);
 void printq(q*);
 // respond to waiting to achieve sync
 void respond(int);
-// wait respond to continue
-void wait_respond(int);
+// wait respond to continue (0 = ack received)
+int wait_respond(int);
 // getting number of files in wanted directory by client
 void num_of_files(int*, fpath*);
 // initializing values in vector, specifiacaly the num of files in wanted directory by client
 void set_max_in_comm_vector(int, int, vector<std::array<int, 3>>*);
+// ---- ADDED: server root jail and cleanup ----
+void set_server_root(string root);
+string resolve_request(string req);
+string client_path(string path);
+void free_tree(fpath*);
+
+#ifndef MSG_NOSIGNAL
+#define MSG_NOSIGNAL 0
+#endif
+
 #endif

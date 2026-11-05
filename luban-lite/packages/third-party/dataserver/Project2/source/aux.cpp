@@ -2,18 +2,68 @@
 #include <dirent.h>
 using namespace std;
 
+// ---- server root (ADDED) ----
+// The server only serves files below this directory. Client paths are relative
+// to it; absolute paths and ".." components are rejected.
+static string g_root = ".";
+
+void set_server_root(string root){
+    while(root.size() > 1 && root[root.size()-1] == '/')
+        root.erase(root.size()-1);
+    g_root = root.empty() ? "." : root;
+}
+
+// map a client request to a server path; "" if the request is not allowed
+string resolve_request(string req){
+    string out = (g_root == ".") ? "" : g_root;
+    size_t i = 0;
+    if(req.empty())
+        return "";
+    while(i < req.size()){
+        size_t j = req.find('/', i);
+        if(j == string::npos) j = req.size();
+        string part = req.substr(i, j - i);
+        i = j + 1;
+        if(part.empty() || part == ".")
+            continue;
+        if(part == ".." || part.find('\\') != string::npos)
+            return "";
+        out += (out.empty() ? "" : "/") + part;
+    }
+    return out.empty() ? "" : out;
+}
+
+// server path -> path sent to the client (relative to the root)
+string client_path(string path){
+    if(g_root != "." && path.compare(0, g_root.size() + 1, g_root + "/") == 0)
+        return path.substr(g_root.size() + 1);
+    return path;
+}
+
+// free a tree built by get_files_info
+void free_tree(fpath* node){
+    fpath* current = node->get_first();
+    while(current != NULL){
+        fpath* next = current->get_next();
+        free_tree(current);
+        current = next;
+    }
+    delete node;
+}
+
 // create a listening socket
 int create_listen(int port, int *server_fd, struct sockaddr_in *address){
     int opt = 1;
  
     // Creating socket file descriptor
-    if ((*server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
+    if ((*server_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
         perror("socket failed");
         return -1;
     }
  
     // Forcefully attaching socket to the port 8080
-    if (setsockopt(*server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt))) {
+    // FIX: SO_REUSEPORT is not portable (lwIP / RT-Thread) and not needed here
+    if (setsockopt(*server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
         perror("setsockopt");
         return -1;
     }
@@ -211,7 +261,7 @@ char* get_path(int sock){
             break;
         path = path + buffer[i];
     }
-    free(buffer);
+    delete[] buffer; // FIX: allocated with new[]
     path = path + '\0';
     
     // char* to string
@@ -230,7 +280,7 @@ void get_info(int sock, int* block){
         return;
     }
     memcpy(block, buffer, sizeof(int));
-    free(buffer);
+    delete[] buffer; // FIX: allocated with new[]
 }
 
 // send block size info to client
@@ -250,13 +300,20 @@ void respond(int socket){
 }
 
 // wait respond to continue
-void wait_respond(int socket){
+// FIX: read exactly the 4-byte ack (a short read used to desync the stream) and
+// fail instead of spinning when the peer is gone ("&&" made the check wrong)
+int wait_respond(int socket){
     char buf[4];
-    int counter = 0;
-    do{
-    read(socket, buf, 4);
-    counter += 1;
-    }while(buf[0] != '}' && buf[1] != '#' && buf[2] != '%' && counter < 100);
+    int got = 0;
+    while(got < 4){
+        int n = read(socket, buf + got, 4 - got);
+        if(n <= 0)
+            return -1;
+        got += n;
+    }
+    if(buf[0] != '}' || buf[1] != '#' || buf[2] != '%')
+        return -1;
+    return 0;
 }
 
 // [debug] sending all files of given path to client (non multithreaded)
@@ -280,22 +337,29 @@ void send_file(int socket, fpath* file, int block){
     // this is number of times server will send block of files
     int send_requests;
     if(file->get_isDir()){
-        cout << path << endl; // will never go in anymore may as well be deleted
         return;
     }
     FILE *f;
     // opening file to be read
     f = fopen(path.c_str(), "rb");
+    if(f == NULL){ // FIX: file vanished or unreadable - report it as an empty file
+        cout << "COULDN'T OPEN " << path << endl;
+    }
     // get size of file
-    fseek(f,0,SEEK_END);
-    int size = ftell(f);
+    int size = 0;
+    if(f != NULL){
+        fseek(f,0,SEEK_END);
+        size = ftell(f);
+    }
 
-    // sending file path to client
-    char info[(file->get_path()).length() + 1];
-    strcpy(info, (file->get_path()).c_str());
-    
+    // sending file path to client (as seen by the client: relative to the server root)
+    // FIX: the 512-byte field used to be read from a path-sized stack buffer (over-read)
+    char info[512] = {'\0'};
+    strncpy(info, client_path(path).c_str(), sizeof(info) - 1);
+
     if(send_data(socket,(char*)info, 512) == -1){
     	cout << "COULDN'T SEND PATH TO CLIENT" << endl;
+    	if(f) fclose(f);
     	return;
     }
     // send file size to client
@@ -304,30 +368,34 @@ void send_file(int socket, fpath* file, int block){
 
     if(send_data(socket,(char*)temp, sizeof(int)) == -1){
     	cout << "COULDN'T SEND FILE SIZE TO CLIENT" << endl;
+    	if(f) fclose(f);
     	return;
     }
 
     // compute number of blocks to client
-    fseek(f, 0, SEEK_SET);
-    if(size == 0){
-        send_requests = 0;
-    }else if(block%size == 0){
-        send_requests = size/block;
-    }else{
-        send_requests = (size/block) + 1;
-    }
-    // sending send_requests blocks to client
+    // FIX: was "block%size == 0", which sent 0 blocks when the size divides the
+    // block (data lost) and one extra block when the block divides the size
+    send_requests = (size + block - 1) / block;
+    if(f != NULL)
+        fseek(f, 0, SEEK_SET);
+    // sending send_requests blocks to client (the last one is zero padded)
+    char* buffer = new char[block];
     for(int i = 0; i < send_requests; i++){
-        char buffer[block] = {""};
+        memset(buffer, 0, block);
         fseek(f,i*block, SEEK_SET);
-        fread(buffer, block, 1, f);
+        if(fread(buffer, 1, block, f) == 0){
+            cout << "COULDN'T READ " << path << endl;
+        }
         if(send_data(socket,(char*)buffer, block) == -1){
         	cout << "COULDN'T SEND PACKET TO CLIENT" << endl;
+        	break;
         }
 
     }
+    delete[] buffer;
     // close file
-    fclose(f);
+    if(f != NULL)
+        fclose(f);
 }
 
 // get file from server
@@ -354,7 +422,7 @@ int get_file(int sock, int block){
         path = path + bufferpath[i];
     }
 
-    free(bufferpath);
+    delete[] bufferpath; // FIX: allocated with new[]
 
     int i;
     // getting the position where the name of the file starts from the whole path
@@ -371,18 +439,14 @@ int get_file(int sock, int block){
     buffer = read_data(sock, sizeof(int));
     if(buffer == NULL){
         cout << "ERROR GETTING FILESIZE" <<  endl;
+        return -1; // FIX: used to continue with a NULL buffer
     }
 
     memcpy(&fileSize, buffer, sizeof(int));
-    free(buffer);
+    delete[] buffer; // FIX: allocated with new[]
     // compute the number of read requests from server
-    if(fileSize == 0){
-        read_requests = 0;
-    }else if(block%fileSize == 0){
-        read_requests = fileSize/block;
-    }else{
-        read_requests = (fileSize/block) + 1;
-    }
+    // FIX: same "block%fileSize" bug as the server side
+    read_requests = (fileSize + block - 1) / block;
 
     FILE *f2;
     
@@ -420,20 +484,12 @@ int get_file(int sock, int block){
             return -1;
         }
 
-        // this is the last iteration, so just get
-        // the leftover bytes from the buffer and break
-        if(read_requests-1 == i){
-            int left = fileSize%block;
-            if(left != 0){
-                char last[left];
-                memcpy(last,b,left);
-                fwrite(last, left, 1, f2);
-                break;
-            }
-        }
+        // the last block is zero padded by the server: keep only the real bytes
+        int left = fileSize - i*block;
+        int len = left < block ? left : block;
         // write bytes to file
-        fwrite(b, block, 1, f2);
-        free(b);
+        fwrite(b, len, 1, f2);
+        delete[] b; // FIX: allocated with new[] (and was leaked on the last block)
     }
     // close file
     fclose(f2);
@@ -499,7 +555,9 @@ void push_entries(int socket ,q** file_q_ptr, fpath* file, pthread_mutex_t& lock
 // push entry/file to shared queue of threads
 void push_entry(int socket, q** file_q_ptr, fpath* file, pthread_mutex_t& lock, pthread_mutex_t& full, pthread_mutex_t& empty, pthread_mutex_t& print,pthread_cond_t& emp, pthread_cond_t& f, pthread_t id){
     // create a new q_node from the given file
-    q_node* new_entry = new q_node(socket, file);
+    // FIX: the entry gets its own copy so the comm thread can free the scanned
+    // tree without racing the workers (the tree used to be leaked)
+    q_node* new_entry = new q_node(socket, new fpath(file->get_path(), file->get_name(), file->get_depth(), NULL, false));
     pthread_mutex_lock(&full);
     while(1){
         pthread_mutex_lock(&lock);
@@ -616,15 +674,18 @@ char* read_data(int sock, int size){
 int send_data(int sock, char* buf, int size){
     int sent_bytes = 0;
     int total_bytes = 0;
+    // FIX: the receiver acks once per complete chunk (read_data), so send the
+    // whole chunk first and then wait for that single ack. Waiting after every
+    // partial send() deadlocked when send() did not take the whole chunk.
     while(total_bytes < size){
-        sent_bytes = send(sock, buf+total_bytes, size - total_bytes,0);
-        wait_respond(sock);
-        if (sent_bytes == -1)
+        sent_bytes = send(sock, buf+total_bytes, size - total_bytes, MSG_NOSIGNAL);
+        if (sent_bytes <= 0)
         {
             return -1;
         }
-        total_bytes += sent_bytes;    
+        total_bytes += sent_bytes;
     }
-    
+    if(wait_respond(sock) != 0)
+        return -1;
     return 1;
 }

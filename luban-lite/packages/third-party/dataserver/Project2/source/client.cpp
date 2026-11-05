@@ -20,6 +20,8 @@ int main(int argc, char** argv)
 
     // connect to server!
     sock = connect_to_server(port, ip, &client_fd);
+    if(sock < 0) // FIX: continued with an invalid socket
+        return 1;
 
     // get block size so client know how much to read
     get_info(sock,&block_size);
@@ -33,6 +35,7 @@ int main(int argc, char** argv)
     
     cout << "CONNECTION CLOSED" << endl;
     // closing the connected socket
-    close(client_fd);
+    // FIX: client_fd holds connect()'s return value (0), which closed stdin
+    close(sock);
     return 0;
 }

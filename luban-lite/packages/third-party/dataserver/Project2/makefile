@@ -6,6 +6,8 @@ EXECSER = dataServer
 EXECCLI = remoteClient
 COMP = g++
 FLAGS = -std=c++11 -g -Wall -c -ggdb3 -lpthread
+# FIX: lib/ is not tracked by git, the build failed on a fresh clone
+$(shell mkdir -p lib)
 #executable
 all: server client
 

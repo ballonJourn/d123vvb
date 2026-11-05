@@ -1,5 +1,6 @@
 #include "../header/aux.h"
 #include "../header/fpath.h"
+#include <signal.h>
 
 using namespace std;
 
@@ -89,6 +90,9 @@ void* thread_func_worker(void* arg){
     
     // here is all the work done (sending file info, the file itself etc)
     work(entry, block_size);
+    // FIX: entries (and their file copy) were never freed
+    delete entry->get_file();
+    delete entry;
     
     // locking to avoid segmentations (data racing)
     pthread_mutex_lock(&vec_lock);
@@ -128,8 +132,23 @@ void* thread_func_comm(void* arg){
 
   // get path from client
   char* path = get_path(current_socket);
+  if(path == NULL){
+    close(current_socket);
+    delete((int*)arg);
+    return NULL;
+  }
   // make it a string to help yourself
-  string strPath = path;
+  // FIX: only paths below the server root are served (no "..", no absolute paths)
+  string strPath = resolve_request(string(path));
+  delete[] path;
+  if(strPath.empty()){
+    pthread_mutex_lock(&print);
+    cout << "[Thread: " << id << "]: Rejected request outside the server root" << endl;
+    pthread_mutex_unlock(&print);
+    close(current_socket);
+    delete((int*)arg);
+    return NULL;
+  }
   
   // lock print for aesthetic and readability reasons
   pthread_mutex_lock(&print);
@@ -138,11 +157,20 @@ void* thread_func_comm(void* arg){
   
   // create a structure holding the files info and hierarchy (NOT THE DATA)
   fpath* root = new fpath(strPath, strPath,0, NULL, true);
-  get_files_info(path, &root, root->get_depth());
+  get_files_info((char*)strPath.c_str(), &root, root->get_depth());
 
   // get how many files are in the wanted directory
   int counter = 0;
   num_of_files(&counter, root);
+
+  // FIX: an empty or missing directory never closed the connection and the
+  // client waited forever
+  if(counter == 0){
+    close(current_socket);
+    free_tree(root);
+    delete((int*)arg);
+    return NULL;
+  }
 
   // lock the vector to avoid segmentations and wrong readings (data race)
   pthread_mutex_lock(&vec_lock);
@@ -151,6 +179,8 @@ void* thread_func_comm(void* arg){
   
   // push all the entries to file_q
   push_entries(current_socket, &file_q, root, q_lock, q_full, q_empty, print, emp, f, id);
+  // FIX: every queued entry owns a copy of its node, so the tree can go now
+  free_tree(root);
   delete((int*)arg);
 
   return NULL;
@@ -192,17 +222,28 @@ int main(int argc, char** argv)
 
 
   int port, q_size;
+  // ADDED: optional "-r <root>" (directory the clients may read from)
+  string root_dir = ".";
+  if(argc == 11 && strcmp(argv[9], "-r") == 0){
+    root_dir = argv[10];
+    argc = 9;
+  }
   // get arguments from command line
   if(read_args(argc, argv, &port, &thread_pool_size, &q_size, &block_size) == -1){
     cout << "Wrong arguments!" << endl;
+    cout << "usage: dataServer -p <port> -s <thread_pool_size> -q <queue_size> -b <block_size> [-r <root>]" << endl;
     return -1;
   }
+  set_server_root(root_dir);
+  // FIX: a client that disconnects mid-transfer used to kill the server (SIGPIPE)
+  signal(SIGPIPE, SIG_IGN);
 
   cout << "Server's parameters are:" << endl;
   cout << "port: " << port << endl;
   cout << "thread_pool_size: " << thread_pool_size << endl;
   cout << "queue_size: " << q_size << endl;
   cout << "Block_size: " << block_size << endl;
+  cout << "root: " << root_dir << endl;
   
 
   // create an int[thread_pool_size] which holds if a worker thread is busy
@@ -238,20 +279,23 @@ int main(int argc, char** argv)
 
   cout << "Server was successfully initialized..." << endl;
   cout << "Listening for connections to port " << port << endl;
-  // vector for communication threads - maybe at the end wait for join 
-  // NOT IN LOOP BECAUSE NEW CONNECTIONS ARE WAITING UNTIL CURR COMM THREAD IS FINISHED
-  vector<pthread_t> comm_threads;
   while(1){
     // wait until someone connects
     new_socket = create_connection(port, &server_fd, &address);
+    if(new_socket < 0) // FIX: accept() errors spawned a thread on fd -1
+      continue;
     printf("Accepted connection from %s\n", inet_ntoa(address.sin_addr));
     pthread_t new_thread;
     int* sock = new int();
     *sock = new_socket;
     // create a new communication thread with the new socket as argument
-    pthread_create(&new_thread, NULL, thread_func_comm, sock);
-    // hold the new thread
-    comm_threads.push_back(new_thread);
+    if(pthread_create(&new_thread, NULL, thread_func_comm, sock) != 0){
+      close(new_socket);
+      delete sock;
+      continue;
+    }
+    // FIX: comm threads were never joined; detach so their resources are freed
+    pthread_detach(new_thread);
     // pthread_join(new_thread, NULL);
   }
   // closing the listening socket
