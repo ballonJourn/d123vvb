@@ -97,7 +97,7 @@ class StrataApiTest(unittest.TestCase):
                 f.write(blob)
         cls.port, cls.sport, cls.web = free_port(), free_port(), free_port()
         cls.ds = subprocess.Popen([SERVER, "-p", str(cls.port), "-s", "2", "-q", "4", "-b", "512",
-                                   "-r", cls.root, "-S", str(cls.sport)],
+                                   "-r", cls.root, "-S", str(cls.sport), "-L"],
                                   stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
         assert cls.ds.stdout.readline().startswith("READY")
         cls.out = os.path.join(cls.work, "out")
@@ -192,6 +192,25 @@ class StrataApiTest(unittest.TestCase):
         self.assertIsInstance(lo["rx_rate"], (int, float))
         self.assertGreaterEqual(len(b["history"]["t"]), 2)
         self.assertEqual(len(b["history"]["ifs"]["lo"]["rx"]), len(b["history"]["t"]))
+        # the C formatter's new fields reach the dashboard's rows and history (contract between dsstat.c and d133.mjs)
+        for k in ("rx_pps", "tx_pps", "rx_drop_rate", "tx_err_rate"):
+            self.assertIsInstance(lo[k], (int, float), k)
+        for k in ("rx_pps", "tx_pps", "rx_drop", "tx_err"):
+            self.assertEqual(len(b["history"]["ifs"]["lo"][k]), len(b["history"]["t"]), k)
+
+    def test_5b_lwip_object_from_the_c_code(self):
+        # the host server runs with -L: fixed lwIP counters (11, 12, ... see host/main_host.c sim_lwip)
+        for _ in range(3):
+            b = self.get("/api/d133/board")
+            time.sleep(1.05)
+        lw = b["lwip"]
+        self.assertEqual(lw["stats"], 1)
+        self.assertEqual((lw["ip_drop"], lw["link_drop"], lw["pbuf_err"], lw["inpkt_err"]), (11, 21, 31, 41))
+        self.assertEqual((lw["pbuf_max"], lw["inpkt_max"]), (33, 43))
+        self.assertEqual(lw["limits"], {"pbuf_pool": 64, "inpkt_pool": 128, "mbox": 8})
+        self.assertEqual(set(lw["rates"]), {"ip_drop", "ip_rterr", "ip_chkerr", "ip_lenerr", "ip_memerr", "link_drop", "link_memerr",
+                                            "link_chkerr", "link_lenerr", "pbuf_err", "inpkt_err"})
+        self.assertTrue(all(v == 0 for v in lw["rates"].values()), lw["rates"])     # constant counters: zero per second
         self.assertEqual(b["dataserver"]["running"], 1)
 
     def test_6_board_unreachable_and_bad_port(self):

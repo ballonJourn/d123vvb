@@ -88,10 +88,13 @@ dataserver: running, port 9000, root /data/adas, 2 workers, block 4096
 
 ```
 aic /> netmon
-if   ip              up       rx bytes    rx pkts     tx bytes    tx pkts
-e0   192.168.1.1     yes        183402       1210       950112        822
-w1   192.168.169.1   yes        402118       3311      9120443       6551
+if   ip              up       rx bytes    rx pkts     tx bytes    tx pkts  rx drop   tx err
+e0   192.168.1.1     yes        183402       1210       950112        822        0        0
+w1   192.168.169.1   yes        402118       3311      9120443       6551        0        0
 ip forwarded packets: 2310
+limits: pbuf pool 64, tcpip input messages 128, tcpip mailbox 8
+ip drop 0 rterr 0 memerr 0 | link drop 0 memerr 0
+pbuf: 0 failures, high-water 12 of 64 | tcpip msgs: 0 failures, high-water 4 of 128
 ```
 
 Resource notes: 1 accept thread + `POOL_SIZE` workers + one short-lived comm
@@ -105,8 +108,9 @@ Each socket and each open file uses a DFS descriptor (`DFS_FD_MAX` = 16).
 
 ```
 $ nc 192.168.169.1 9001
-{"v":1,"uptime_ms":812345,"ifs":[{"name":"e0","ip":"192.168.1.1","up":1,"rx_bytes":183402,...},
- {"name":"w1","ip":"192.168.169.1",...}],"ip_forwarded":2310,"dataserver":{"running":1,...}}
+{"v":1,"uptime_ms":812345,"ifs":[{"name":"e0","ip":"192.168.1.1","up":1,"rx_bytes":183402,...,"rx_drop":0,"tx_err":0},
+ {"name":"w1","ip":"192.168.169.1",...}],"ip_forwarded":2310,"lwip":{"stats":1,"ip_drop":0,...,"limits":{"pbuf_pool":64,
+ "inpkt_pool":128,"mbox":8}},"dataserver":{"running":1,...}}
 ```
 
 The interface counters come from `netmon.c`, which wraps each lwIP netif's
@@ -114,17 +118,38 @@ The interface counters come from `netmon.c`, which wraps each lwIP netif's
 (Apache-2.0, header kept), but only counts: no copy, no malloc on the data
 path. Everything that crosses e0 or w1 is counted: dataServer pulls, FTP,
 iperf and packets forwarded between the Ethernet PC and the WiFi PC.
-`ip_forwarded` is lwIP's `ip.fw` counter and is `-1` unless `RT_LWIP_STATS`
-is enabled. Counters are 32-bit and wrap; the dashboard handles that.
-Cost: one RT-Thread thread (4 KB stack, no pthread slot) and one socket.
+
+* `rx_bytes` / `rx_pkts` and `tx_bytes` / `tx_pkts` count frames the stack (input) or the driver
+  (linkoutput) **accepted**. A frame that `input()` or `linkoutput()` refused is counted in `rx_drop` /
+  `tx_err` instead. This is the only place a full forwarding queue is visible: lwIP's `tcpip_inpkt()`
+  returns `ERR_MEM` when the tcpip mailbox or its message pool is full and counts nothing. (The SDK's
+  `ethernetif.c` and `wlan_lwip.c` both free the pbuf when `input()` fails.)
+* `ip_forwarded` is lwIP's `ip.fw` counter, `-1` without `RT_LWIP_STATS`.
+* `lwip` holds lwIP's drop counters (IP and link layer, receive buffer pool, tcpip message pool), the
+  pools' high-water marks and, always, the limits they are read against (`PBUF_POOL_SIZE`,
+  `MEMP_NUM_TCPIP_MSG_INPKT`, `TCPIP_MBOX_SIZE`). The counters need `RT_LWIP_STATS`, which
+  `DATASERVER_LWIP_STATS` (default y) selects; `lwipopts.h` then makes them 32 bit (lwIP's default is 16 bit,
+  which wraps every few seconds at stream rates). Tune the limits only when these numbers show one running out.
+* Interface counters are 32-bit and wrap; the dashboard handles that.
+
+Cost, from the compiler (`-fstack-usage`, `size`), not from the running board: about 1 KB more code than the
+version without the extensions, 48 bytes more static data, and the JSON buffer (malloc'ed once) grew from 1536
+to 2560 bytes. The stats thread uses one RT-Thread thread (4 KB stack, no pthread slot) and one socket; its own
+stack frames add up to about 700 bytes (`serve_one` 432, `dsstat_format` 192, `netmon_snapshot` 48), the depth
+inside `snprintf` and the socket calls is not known: after a few polls, `list_thread` shows how much of the
+4 KB the `dsstat` thread really used.
+
+The stream measurements built on these counters (loss per segment, calibration) are described in
+`dashboard/strata-host/D133-STREAM.md`; `cli.mjs calibrate` checks the counters against a known packet count.
 
 ## PC1 <-> PC2 through the board
 
 The defconfig already routes between e0 (192.168.1.1) and the WiFi AP
 (192.168.169.1) with `RT_LWIP_IP_FORWARD`; no NAT is needed. The SDK's
 `lwip-nat` component only hooks into lwIP 1.4.1 (`ip_nat_input/ip_nat_out`
-are called from `lwip-1.4.1/src/core/ipv4/ip.c` only), so with the default
-lwIP 2.1.2 enabling `LWIP_USING_NAT` compiles but does nothing.
+are called from `lwip-1.4.1/src/core/ipv4/ip.c` only), and no Kconfig symbol
+`LWIP_USING_NAT` exists in this SDK, so it cannot be switched on with the default
+lwIP 2.1.2.
 
 * WiFi PC: takes 192.168.169.x and the gateway from the board's DHCP server.
 * Ethernet PC: static 192.168.1.x and a route to the AP subnet:

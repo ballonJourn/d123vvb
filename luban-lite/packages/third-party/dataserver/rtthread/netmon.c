@@ -232,6 +232,23 @@ static int netmon(int argc, char **argv)
         rt_kprintf("ip forwarded packets: %u\n", (unsigned)fw);
     else
         rt_kprintf("ip forwarded packets: n/a (enable RT_LWIP_STATS)\n");
+    {
+        netmon_lwip_t lw;
+
+        netmon_lwip(&lw);
+        rt_kprintf("limits: pbuf pool %u, tcpip input messages %u, tcpip mailbox %u\n",
+                   (unsigned)lw.pbuf_pool_size, (unsigned)lw.inpkt_pool_size, (unsigned)lw.mbox_size);
+        if (lw.stats) {
+            rt_kprintf("ip drop %u rterr %u memerr %u | link drop %u memerr %u\n",
+                       (unsigned)lw.ip_drop, (unsigned)lw.ip_rterr, (unsigned)lw.ip_memerr,
+                       (unsigned)lw.link_drop, (unsigned)lw.link_memerr);
+            rt_kprintf("pbuf: %u failures, high-water %u of %u | tcpip msgs: %u failures, high-water %u of %u\n",
+                       (unsigned)lw.pbuf_err, (unsigned)lw.pbuf_max, (unsigned)lw.pbuf_pool_size,
+                       (unsigned)lw.inpkt_err, (unsigned)lw.inpkt_max, (unsigned)lw.inpkt_pool_size);
+        } else {
+            rt_kprintf("lwip counters: off (enable RT_LWIP_STATS)\n");
+        }
+    }
     return 0;
 }
 MSH_CMD_EXPORT(netmon, per-interface traffic counters (e0/w0/w1));
