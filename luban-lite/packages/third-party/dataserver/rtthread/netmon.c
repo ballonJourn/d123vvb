@@ -12,6 +12,8 @@
  * Changes from tcpdump: every netif instead of one, no packet copy, no
  * mailbox and no malloc on the data path, only counters; a netif whose
  * input/linkoutput was replaced again (driver re-init) is hooked again.
+ * The return value of input()/linkoutput() is counted too: a frame the stack or the
+ * driver refuses is a drop (rx_dropped / tx_errors) and is not added to the byte counters.
  *
  * RX is counted in netif->input (called by the RT-Thread eth rx thread,
  * see port/ethernetif.c), TX in netif->linkoutput (called by etharp from
@@ -34,7 +36,7 @@ typedef struct {
     struct netif           *nif;      /* NULL: free slot */
     netif_input_fn          input;    /* saved originals */
     netif_linkoutput_fn     linkoutput;
-    volatile uint32_t       rx_bytes, tx_bytes, rx_pkts, tx_pkts;
+    volatile uint32_t       rx_bytes, tx_bytes, rx_pkts, tx_pkts, rx_dropped, tx_errors;
 } netmon_entry_t;
 
 static netmon_entry_t s_tab[NETMON_MAX_IF];
@@ -53,11 +55,20 @@ static err_t netmon_input(struct pbuf *p, struct netif *inp)
 {
     netmon_entry_t *e = find(inp);
 
+    u16_t len;
+    err_t r;
+
     if (e == RT_NULL || e->input == RT_NULL)
         return ERR_IF;                 /* caller frees p */
-    e->rx_bytes += p->tot_len;         /* read before input() may free p */
-    e->rx_pkts++;
-    return e->input(p, inp);
+    len = p->tot_len;                  /* read before input() may free p */
+    r = e->input(p, inp);
+    if (r == ERR_OK) {
+        e->rx_bytes += len;
+        e->rx_pkts++;
+    } else {
+        e->rx_dropped++;               /* the caller frees p: mailbox or pool full */
+    }
+    return r;
 }
 
 /* tx: same place tcpdump's _netif_linkoutput taps */
@@ -65,11 +76,20 @@ static err_t netmon_linkoutput(struct netif *nif, struct pbuf *p)
 {
     netmon_entry_t *e = find(nif);
 
+    u16_t len;
+    err_t r;
+
     if (e == RT_NULL || e->linkoutput == RT_NULL)
         return ERR_IF;
-    e->tx_bytes += p->tot_len;
-    e->tx_pkts++;
-    return e->linkoutput(nif, p);
+    len = p->tot_len;
+    r = e->linkoutput(nif, p);
+    if (r == ERR_OK) {
+        e->tx_bytes += len;
+        e->tx_pkts++;
+    } else {
+        e->tx_errors++;                /* driver queue full or link down */
+    }
+    return r;
 }
 
 int netmon_hook_all(void)
@@ -142,6 +162,8 @@ int netmon_snapshot(netmon_if_t *out, int max)
         out[cnt].tx_bytes = e->tx_bytes;
         out[cnt].rx_pkts = e->rx_pkts;
         out[cnt].tx_pkts = e->tx_pkts;
+        out[cnt].rx_dropped = e->rx_dropped;
+        out[cnt].tx_errors = e->tx_errors;
         cnt++;
     }
     return cnt;
@@ -156,6 +178,38 @@ int64_t netmon_ip_forwarded(void)
 #endif
 }
 
+/* lwIP counters. STAT_COUNTER is 16 bit unless LWIP_STATS_LARGE is set (lwipopts.h sets it with
+   RT_LWIP_STATS), otherwise they would wrap every few seconds at stream rates. */
+void netmon_lwip(netmon_lwip_t *o)
+{
+    memset(o, 0, sizeof(*o));
+    o->pbuf_pool_size = PBUF_POOL_SIZE;
+    o->mbox_size = TCPIP_MBOX_SIZE;
+#if !LWIP_TCPIP_CORE_LOCKING_INPUT
+    o->inpkt_pool_size = MEMP_NUM_TCPIP_MSG_INPKT;
+#endif
+#if LWIP_STATS && IP_STATS && LINK_STATS && MEMP_STATS
+    o->stats = 1;
+    o->ip_drop = lwip_stats.ip.drop;       o->ip_rterr = lwip_stats.ip.rterr;
+    o->ip_chkerr = lwip_stats.ip.chkerr;   o->ip_lenerr = lwip_stats.ip.lenerr;
+    o->ip_memerr = lwip_stats.ip.memerr;
+    o->link_drop = lwip_stats.link.drop;   o->link_memerr = lwip_stats.link.memerr;
+    o->link_chkerr = lwip_stats.link.chkerr; o->link_lenerr = lwip_stats.link.lenerr;
+    if (lwip_stats.memp[MEMP_PBUF_POOL] != RT_NULL) {
+        o->pbuf_err = lwip_stats.memp[MEMP_PBUF_POOL]->err;
+        o->pbuf_used = lwip_stats.memp[MEMP_PBUF_POOL]->used;
+        o->pbuf_max = lwip_stats.memp[MEMP_PBUF_POOL]->max;
+    }
+#if !LWIP_TCPIP_CORE_LOCKING_INPUT
+    if (lwip_stats.memp[MEMP_TCPIP_MSG_INPKT] != RT_NULL) {
+        o->inpkt_err = lwip_stats.memp[MEMP_TCPIP_MSG_INPKT]->err;
+        o->inpkt_used = lwip_stats.memp[MEMP_TCPIP_MSG_INPKT]->used;
+        o->inpkt_max = lwip_stats.memp[MEMP_TCPIP_MSG_INPKT]->max;
+    }
+#endif
+#endif
+}
+
 static int netmon(int argc, char **argv)
 {
     netmon_if_t t[NETMON_MAX_IF];
@@ -164,14 +218,15 @@ static int netmon(int argc, char **argv)
 
     (void)argc; (void)argv;
     n = netmon_snapshot(t, NETMON_MAX_IF);
-    rt_kprintf("%-4s %-15s %-4s %12s %10s %12s %10s\n",
-               "if", "ip", "up", "rx bytes", "rx pkts", "tx bytes", "tx pkts");
+    rt_kprintf("%-4s %-15s %-4s %12s %10s %12s %10s %8s %8s\n",
+               "if", "ip", "up", "rx bytes", "rx pkts", "tx bytes", "tx pkts", "rx drop", "tx err");
     for (i = 0; i < n; i++)
-        rt_kprintf("%-4s %3u.%u.%u.%-7u %-4s %12u %10u %12u %10u\n", t[i].name,
+        rt_kprintf("%-4s %3u.%u.%u.%-7u %-4s %12u %10u %12u %10u %8u %8u\n", t[i].name,
                    t[i].ip[0], t[i].ip[1], t[i].ip[2], t[i].ip[3],
                    t[i].up ? "yes" : "no",
                    (unsigned)t[i].rx_bytes, (unsigned)t[i].rx_pkts,
-                   (unsigned)t[i].tx_bytes, (unsigned)t[i].tx_pkts);
+                   (unsigned)t[i].tx_bytes, (unsigned)t[i].tx_pkts,
+                   (unsigned)t[i].rx_dropped, (unsigned)t[i].tx_errors);
     fw = netmon_ip_forwarded();
     if (fw >= 0)
         rt_kprintf("ip forwarded packets: %u\n", (unsigned)fw);

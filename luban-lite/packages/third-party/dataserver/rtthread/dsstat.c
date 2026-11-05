@@ -35,7 +35,8 @@ static struct {
     volatile int        running;
     netmon_snapshot_fn  ifs;
     netmon_forwarded_fn fw;
-} S = { 0, -1, 0, NULL, NULL };
+    netmon_lwip_fn      lw;
+} S = { 0, -1, 0, NULL, NULL, NULL };
 
 /* ------------------------------------------------------------ JSON ---- */
 /* Interface names come from lwIP (two letters + digits) or /proc on the host;
@@ -69,7 +70,8 @@ static const char *u64s(char *b, uint64_t v)
 
 int dsstat_format(char *buf, size_t len, uint64_t uptime_ms,
                   const netmon_if_t *ifs, int nif, int64_t ip_forwarded,
-                  int ds_running, const dataserver_stats_t *ds)
+                  int ds_running, const dataserver_stats_t *ds,
+                  const netmon_lwip_t *lw)
 {
     size_t pos = 0;
     char name[sizeof(ifs[0].name)];
@@ -82,14 +84,35 @@ int dsstat_format(char *buf, size_t len, uint64_t uptime_ms,
     for (i = 0; i < nif; i++) {
         safe_name(name, sizeof(name), ifs[i].name);
         PUT("%s{\"name\":\"%s\",\"ip\":\"%u.%u.%u.%u\",\"up\":%u,"
-            "\"rx_bytes\":%lu,\"tx_bytes\":%lu,\"rx_pkts\":%lu,\"tx_pkts\":%lu}",
+            "\"rx_bytes\":%lu,\"tx_bytes\":%lu,\"rx_pkts\":%lu,\"tx_pkts\":%lu,"
+            "\"rx_drop\":%lu,\"tx_err\":%lu}",
             i ? "," : "", name, ifs[i].ip[0], ifs[i].ip[1], ifs[i].ip[2], ifs[i].ip[3],
             ifs[i].up ? 1u : 0u,
             (unsigned long)ifs[i].rx_bytes, (unsigned long)ifs[i].tx_bytes,
-            (unsigned long)ifs[i].rx_pkts, (unsigned long)ifs[i].tx_pkts);
+            (unsigned long)ifs[i].rx_pkts, (unsigned long)ifs[i].tx_pkts,
+            (unsigned long)ifs[i].rx_dropped, (unsigned long)ifs[i].tx_errors);
     }
-    PUT("],\"ip_forwarded\":%s%s,\"dataserver\":", ip_forwarded < 0 ? "-" : "",
+    PUT("],\"ip_forwarded\":%s%s,\"lwip\":", ip_forwarded < 0 ? "-" : "",
         u64s(n1, ip_forwarded < 0 ? 1u : (uint64_t)ip_forwarded));
+    if (lw) {
+        PUT("{\"stats\":%u", lw->stats ? 1u : 0u);
+        if (lw->stats)
+            PUT(",\"ip_drop\":%lu,\"ip_rterr\":%lu,\"ip_chkerr\":%lu,\"ip_lenerr\":%lu,\"ip_memerr\":%lu,"
+                "\"link_drop\":%lu,\"link_memerr\":%lu,\"link_chkerr\":%lu,\"link_lenerr\":%lu,"
+                "\"pbuf_err\":%lu,\"pbuf_used\":%lu,\"pbuf_max\":%lu,"
+                "\"inpkt_err\":%lu,\"inpkt_used\":%lu,\"inpkt_max\":%lu",
+                (unsigned long)lw->ip_drop, (unsigned long)lw->ip_rterr, (unsigned long)lw->ip_chkerr,
+                (unsigned long)lw->ip_lenerr, (unsigned long)lw->ip_memerr,
+                (unsigned long)lw->link_drop, (unsigned long)lw->link_memerr,
+                (unsigned long)lw->link_chkerr, (unsigned long)lw->link_lenerr,
+                (unsigned long)lw->pbuf_err, (unsigned long)lw->pbuf_used, (unsigned long)lw->pbuf_max,
+                (unsigned long)lw->inpkt_err, (unsigned long)lw->inpkt_used, (unsigned long)lw->inpkt_max);
+        PUT(",\"limits\":{\"pbuf_pool\":%lu,\"inpkt_pool\":%lu,\"mbox\":%lu}}",
+            (unsigned long)lw->pbuf_pool_size, (unsigned long)lw->inpkt_pool_size,
+            (unsigned long)lw->mbox_size);
+    } else
+        PUT("null");
+    PUT(",\"dataserver\":");
     if (ds)
         PUT("{\"running\":%d,\"connections\":%lu,\"requests_done\":%lu,"
             "\"files_sent\":%lu,\"rejected\":%lu,\"queued\":%lu,\"bytes_sent\":%s}}",
@@ -118,14 +141,17 @@ static void serve_one(int c, char *json)
 {
     netmon_if_t ifs[NETMON_MAX_IF];
     dataserver_stats_t ds;
+    netmon_lwip_t lw;
     struct timeval tv = { 2, 0 };
     int nif = S.ifs ? S.ifs(ifs, NETMON_MAX_IF) : 0;
     int64_t fw = S.fw ? S.fw() : -1;
     int n, off = 0;
 
+    if (S.lw)
+        S.lw(&lw);
     dataserver_get_stats(&ds);
     n = dsstat_format(json, DSSTAT_JSON_MAX - 1, uptime_ms(), ifs, nif, fw,
-                      dataserver_running(), &ds);
+                      dataserver_running(), &ds, S.lw ? &lw : NULL);
     if (n < 0)
         n = snprintf(json, DSSTAT_JSON_MAX - 1, "{\"v\":1,\"error\":\"overflow\"}");
     json[n++] = '\n';
@@ -171,7 +197,7 @@ static void thread_entry(void *arg) { (void)arg; accept_loop(); }
 static void *thread_entry(void *arg) { (void)arg; accept_loop(); return NULL; }
 #endif
 
-int dsstat_start(int port, netmon_snapshot_fn ifs, netmon_forwarded_fn fw)
+int dsstat_start(int port, netmon_snapshot_fn ifs, netmon_forwarded_fn fw, netmon_lwip_fn lw)
 {
     struct sockaddr_in a;
     int opt = 1;
@@ -181,6 +207,7 @@ int dsstat_start(int port, netmon_snapshot_fn ifs, netmon_forwarded_fn fw)
     S.port = port;
     S.ifs = ifs;
     S.fw = fw;
+    S.lw = lw;
     S.fd = socket(AF_INET, SOCK_STREAM, 0);
     if (S.fd < 0) {
         st_log("socket failed");

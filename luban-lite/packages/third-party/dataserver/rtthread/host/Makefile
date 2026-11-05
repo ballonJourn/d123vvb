@@ -10,6 +10,9 @@ all: dataserver_c remoteClient
 dataserver_c: ../dataserver.c ../dataserver.h ../dsstat.c ../dsstat.h ../netmon.h main_host.c
 	$(CC) $(CFLAGS) -o $@ ../dataserver.c ../dsstat.c main_host.c
 
+test_format: ../dataserver.c ../dsstat.c ../dsstat.h ../netmon.h test_format.c
+	$(CC) $(CFLAGS) -o $@ ../dataserver.c ../dsstat.c test_format.c
+
 remoteClient:
 	$(MAKE) -C $(UPSTREAM) client
 	cp $(UPSTREAM)/remoteClient $@
@@ -21,7 +24,7 @@ tsan: CFLAGS += -fsanitize=thread
 tsan: clean-server dataserver_c
 
 clean-server:
-	rm -f dataserver_c
+	rm -f dataserver_c test_format
 
 clean: clean-server
 	rm -f remoteClient

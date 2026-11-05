@@ -51,7 +51,7 @@ static int dataserver_start_default(void)
         return -1;
 #if DATASERVER_STAT_PORT > 0
     netmon_hook_all();
-    if (dsstat_start(DATASERVER_STAT_PORT, netmon_snapshot, netmon_ip_forwarded) != 0)
+    if (dsstat_start(DATASERVER_STAT_PORT, netmon_snapshot, netmon_ip_forwarded, netmon_lwip) != 0)
         rt_kprintf("dataserver: stats port %d not started\n", DATASERVER_STAT_PORT);
 #endif
     return 0;

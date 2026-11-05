@@ -1,8 +1,9 @@
 /*
  * Host runner for the C port, same command line as upstream dataServer:
  *   dataserver_c -p <port> -s <thread_pool_size> -q <queue_size> -b <block_size> [-r <root>]
- *                [-S <stats_port>]
+ *                [-S <stats_port>] [-L]
  * Used to test the board code on a PC against the upstream remoteClient.
+ * -L makes the stats endpoint report simulated lwIP counters (tests only).
  * -S starts the dsstat endpoint; interface counters come from /proc/net/dev
  * (the board uses netmon.c hooks on lwIP instead).
  */
@@ -25,14 +26,14 @@ static int proc_snapshot(netmon_if_t *out, int max)
         return 0;
     while (n < max && fgets(line, sizeof(line), f)) {
         char *colon = strchr(line, ':'), *name = line;
-        unsigned long long v[10];
+        unsigned long long v[16];
         if (colon == NULL)
             continue;                 /* header lines */
         *colon = '\0';
         while (*name == ' ')
             name++;
-        if (sscanf(colon + 1, "%llu %llu %llu %llu %llu %llu %llu %llu %llu %llu",
-                   &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6], &v[7], &v[8], &v[9]) != 10)
+        if (sscanf(colon + 1, "%llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu",
+                   &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6], &v[7], &v[8], &v[9], &v[10], &v[11]) != 12)
             continue;
         memset(&out[n], 0, sizeof(out[n]));
         {   /* copy, truncating long names */
@@ -48,20 +49,37 @@ static int proc_snapshot(netmon_if_t *out, int max)
         out[n].rx_pkts  = (uint32_t)v[1];
         out[n].tx_bytes = (uint32_t)v[8];
         out[n].tx_pkts  = (uint32_t)v[9];
+        out[n].rx_dropped = (uint32_t)v[3];               /* rx drop */
+        out[n].tx_errors  = (uint32_t)(v[10] + v[11]);    /* tx errs + tx drop */
         n++;
     }
     fclose(f);
     return n;
 }
 
+/* -L: fixed, recognisable lwIP numbers so the test can check every field of the "lwip" object. */
+static void sim_lwip(netmon_lwip_t *o)
+{
+    memset(o, 0, sizeof(*o));
+    o->stats = 1;
+    o->ip_drop = 11; o->ip_rterr = 12; o->ip_chkerr = 13; o->ip_lenerr = 14; o->ip_memerr = 15;
+    o->link_drop = 21; o->link_memerr = 22; o->link_chkerr = 23; o->link_lenerr = 24;
+    o->pbuf_err = 31; o->pbuf_used = 32; o->pbuf_max = 33;
+    o->inpkt_err = 41; o->inpkt_used = 42; o->inpkt_max = 43;
+    o->pbuf_pool_size = 64; o->inpkt_pool_size = 128; o->mbox_size = 8;
+}
+
 int main(int argc, char **argv)
 {
+    int sim = 0;
     dataserver_config_t cfg;
     int i, stat_port = 0;
 
     dataserver_default_config(&cfg);
     cfg.root = ".";
-    for (i = 1; i + 1 < argc; i += 2) {
+    for (i = 1; i < argc; i += 2) {
+        if (strcmp(argv[i], "-L") == 0) { sim = 1; i--; continue; }
+        if (i + 1 >= argc) { fprintf(stderr, "missing value for %s\n", argv[i]); return 2; }
         if (strcmp(argv[i], "-p") == 0)      cfg.port = atoi(argv[i + 1]);
         else if (strcmp(argv[i], "-s") == 0) cfg.thread_pool_size = atoi(argv[i + 1]);
         else if (strcmp(argv[i], "-q") == 0) cfg.queue_size = atoi(argv[i + 1]);
@@ -69,14 +87,14 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "-r") == 0) cfg.root = argv[i + 1];
         else if (strcmp(argv[i], "-S") == 0) stat_port = atoi(argv[i + 1]);
         else {
-            fprintf(stderr, "usage: %s -p port -s pool -q queue -b block [-r root] [-S stats_port]\n", argv[0]);
+            fprintf(stderr, "usage: %s -p port -s pool -q queue -b block [-r root] [-S stats_port] [-L]\n", argv[0]);
             return 2;
         }
     }
     signal(SIGPIPE, SIG_IGN);
     if (dataserver_start(&cfg) != 0)
         return 1;
-    if (stat_port > 0 && dsstat_start(stat_port, proc_snapshot, NULL) != 0)
+    if (stat_port > 0 && dsstat_start(stat_port, proc_snapshot, NULL, sim ? sim_lwip : NULL) != 0)
         return 1;
     printf("READY %d\n", cfg.port);
     fflush(stdout);

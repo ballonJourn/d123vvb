@@ -527,6 +527,9 @@
 #ifdef RT_LWIP_STATS
 #define LWIP_STATS                  1
 #define LWIP_STATS_DISPLAY          1
+/* 32-bit counters: the default u16_t wraps every few seconds at stream rates (a 1000 packet/s
+   forward counter wraps after 65 s), which a reader cannot tell from a reset. */
+#define LWIP_STATS_LARGE            1
 #else
 #define LWIP_STATS                  0
 #endif

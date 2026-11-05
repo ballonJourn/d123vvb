@@ -45,11 +45,11 @@ def read_stats(port):
 
 
 class HostServer:
-    def __init__(self, root):
+    def __init__(self, root, extra=()):
         subprocess.check_call(["make", "-s", "-C", os.path.join(RTT, "host"), "dataserver_c"])
         self.port, self.sport = free_port(), free_port()
         self.proc = subprocess.Popen([SERVER, "-p", str(self.port), "-s", "2", "-q", "4",
-                                      "-b", "4096", "-r", root, "-S", str(self.sport)],
+                                      "-b", "4096", "-r", root, "-S", str(self.sport), *extra],
                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         assert self.proc.stdout.readline().startswith("READY")
         for _ in range(50):                      # the stats thread starts after READY
@@ -88,10 +88,11 @@ class DsstatEndpointTest(unittest.TestCase):
         self.assertEqual(j["v"], 1)
         self.assertIsInstance(j["uptime_ms"], int)
         self.assertEqual(j["ip_forwarded"], -1)          # host: no provider
+        self.assertIsNone(j["lwip"])                     # host: no lwIP
         names = [i["name"] for i in j["ifs"]]
         self.assertIn("lo", names)
         for i in j["ifs"]:
-            for k in ("rx_bytes", "tx_bytes", "rx_pkts", "tx_pkts"):
+            for k in ("rx_bytes", "tx_bytes", "rx_pkts", "tx_pkts", "rx_drop", "tx_err"):
                 self.assertTrue(0 <= i[k] < 2 ** 32, (i["name"], k, i[k]))
             self.assertRegex(i["ip"], r"^\d+\.\d+\.\d+\.\d+$")
         self.assertEqual(j["dataserver"]["running"], 1)
@@ -120,6 +121,43 @@ class DsstatEndpointTest(unittest.TestCase):
     def test_many_quick_connections(self):
         for _ in range(40):
             read_stats(self.srv.sport)
+
+
+class DsstatLwipTest(unittest.TestCase):
+    """The "lwip" object: every counter reaches the JSON under its own name (host -L simulates
+    recognisable values; the board fills the same struct from lwip_stats, see netmon.c)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.work = tempfile.mkdtemp(prefix="dsstat_lwip_")
+        cls.srv = HostServer(cls.work, extra=("-L",))
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.srv.stop()
+        shutil.rmtree(cls.work, ignore_errors=True)
+
+    def test_every_counter_and_limit(self):
+        lw = read_stats(self.srv.sport)["lwip"]
+        self.assertEqual(lw, {
+            "stats": 1,
+            "ip_drop": 11, "ip_rterr": 12, "ip_chkerr": 13, "ip_lenerr": 14, "ip_memerr": 15,
+            "link_drop": 21, "link_memerr": 22, "link_chkerr": 23, "link_lenerr": 24,
+            "pbuf_err": 31, "pbuf_used": 32, "pbuf_max": 33,
+            "inpkt_err": 41, "inpkt_used": 42, "inpkt_max": 43,
+            "limits": {"pbuf_pool": 64, "inpkt_pool": 128, "mbox": 8},
+        })
+
+
+class DsstatWorstCaseTest(unittest.TestCase):
+    def test_json_fits_with_everything_at_maximum(self):
+        subprocess.check_call(["make", "-s", "-C", os.path.join(RTT, "host"), "test_format"])
+        r = subprocess.run([os.path.join(RTT, "host", "test_format")], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        j = json.loads(r.stdout)                         # a truncated line would not parse
+        self.assertEqual(len(j["ifs"]), 6)
+        self.assertEqual(j["lwip"]["pbuf_used"], 2 ** 32 - 1)
+        self.assertLess(len(r.stdout), 2560)
 
 
 if __name__ == "__main__":

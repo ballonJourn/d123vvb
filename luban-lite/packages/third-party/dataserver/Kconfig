@@ -46,6 +46,18 @@ if LPKG_USING_DATASERVER
           One line of JSON per connection: per-interface byte/packet
           counters of e0/w0/w1 (netmon hooks on lwIP netif input and
           linkoutput) and the dataServer counters. Needs one RT-Thread
-          thread (4 KB stack) and one socket. Enable RT_LWIP_STATS to also
-          get the count of IP packets forwarded between e0 and w1.
+          thread (4 KB stack) and one socket. Frames the stack or the driver
+          refuse are counted per interface (rx_drop, tx_err).
+
+    config DATASERVER_LWIP_STATS
+        bool "Report lwIP drop counters on the stats port (enables RT_LWIP_STATS)"
+        depends on DATASERVER_STAT_PORT != 0
+        select RT_LWIP_STATS
+        default y
+        help
+          Adds the "lwip" object to the stats line: packets forwarded between
+          e0 and w1, drops by layer, buffer pool and tcpip message pool errors,
+          and the configured limits (PBUF_POOL_SIZE, MEMP_NUM_TCPIP_MSG_INPKT,
+          TCPIP_MBOX_SIZE) those counters are to be read against. Tune the
+          limits only after these counters show which one runs out.
 endif
