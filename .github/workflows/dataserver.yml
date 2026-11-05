@@ -1,0 +1,45 @@
+name: dataserver
+
+on:
+  push:
+    paths:
+      - "luban-lite/packages/third-party/dataserver/**"
+      - ".github/workflows/dataserver.yml"
+  pull_request:
+    paths:
+      - "luban-lite/packages/third-party/dataserver/**"
+
+jobs:
+  host-tests:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        build: [plain, asan, tsan]
+    defaults:
+      run:
+        working-directory: luban-lite/packages/third-party/dataserver
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build upstream client and board C port for the host
+        run: |
+          make -C rtthread/host remoteClient
+          if [ "${{ matrix.build }}" = "plain" ]; then make -C rtthread/host dataserver_c; \
+          else make -C rtthread/host ${{ matrix.build }}; fi
+      - name: Tests
+        env:
+          ASAN_OPTIONS: detect_leaks=1
+        run: python3 -m unittest discover -s rtthread/tests -v
+
+  riscv-compile:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install RISC-V GCC and SCons 4.4
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-riscv64-unknown-elf picolibc-riscv64-unknown-elf
+          pip install "scons==4.4.0"
+      - name: Compile board sources with the Luban-Lite flags and rtconfig.h
+        working-directory: luban-lite
+        run: sh packages/third-party/dataserver/rtthread/ci/rv32_check.sh
