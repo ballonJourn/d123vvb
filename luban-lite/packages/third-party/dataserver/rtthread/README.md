@@ -147,21 +147,28 @@ The stream measurements built on these counters (loss per segment, calibration) 
 
 ## PC1 <-> PC2 through the board
 
-The defconfig already routes between e0 (192.168.1.1) and the WiFi AP
-(192.168.169.1) with `RT_LWIP_IP_FORWARD`; no NAT is needed. The SDK's
+The defconfig already routes between the Ethernet interface (`e01`, 192.168.1.1) and the WiFi AP
+(`w03`, 192.168.169.1) with `RT_LWIP_IP_FORWARD`; no NAT is needed. The SDK's
 `lwip-nat` component only hooks into lwIP 1.4.1 (`ip_nat_input/ip_nat_out`
 are called from `lwip-1.4.1/src/core/ipv4/ip.c` only), and no Kconfig symbol
 `LWIP_USING_NAT` exists in this SDK, so it cannot be switched on with the default
 lwIP 2.1.2.
 
 * WiFi PC: takes 192.168.169.x and the gateway from the board's DHCP server.
-* Ethernet PC: static 192.168.1.x and a route to the AP subnet:
+* Ethernet PC: static 192.168.1.x and **a route to the AP subnet only**:
   `route add 192.168.169.0 mask 255.255.255.0 192.168.1.1` (Windows) or
-  `ip route add 192.168.169.0/24 via 192.168.1.1` (Linux).
+  `ip route add 192.168.169.0/24 via 192.168.1.1` (Linux). **Do not make the board its default
+  gateway**: all of that PC's internet traffic (browser, updates, sync) would then go into the board,
+  which has no uplink and drops it, and the board's Ethernet counters fill with traffic that is not
+  the stream. (First calibration on the board: 1000 packets sent, 465 extra packets of about 141 bytes
+  arrived on `e01` that were not forwarded.)
 * Allow ping / the test port in both PCs' firewalls.
 
-Not yet verified on hardware. Check with `ping` across, then `netmon`: both
-e0 and w1 counters grow and `ip forwarded packets` grows.
+Verified on the real board: ping across works with TTL 127 (one hop), and `cli.mjs calibrate` sent
+1000 datagrams at 500 packets/s of which all 1000 left `w03`, none was refused, and lwIP's `ip.fw`
+counted 1000; the `w03` counter averaged exactly 1074.0 bytes per packet = IP packet 1060 + the
+14 byte Ethernet header, so the counters include it. Not yet measured: the rate at which loss begins,
+and long-running stability.
 
 ## PC side
 

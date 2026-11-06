@@ -74,6 +74,13 @@ before and after. It checks: packets arrive at the Ethernet interface (`rx_pkts 
 nothing is refused at a gentle rate, both interfaces frame alike, and `ip_forwarded` counts them.
 Run it first after flashing; anything that is not PASS names what to look at.
 
+First run on the real board (the interfaces turned out to be `e01` / `w03`): 1000 datagrams sent, all 1000
+forwarded and none refused, 1074.0 bytes per packet on `w03` (the Ethernet header is counted). 465 other
+packets arrived on `e01`; they were not forwarded and averaged about 141 bytes. The most likely cause is
+the PC using the board as its default gateway (see `rtthread/README.md`); `calibrate` now says what the
+extra packets look like and what lwIP counted for them, measures the framing on the egress side where only
+the stream passes, and compares the forwarded count with what was sent instead of with what `e01` counted.
+
 The SDK source confirms the premise of the refusal counter: both the Ethernet port (`ethernetif.c`) and the
 WiFi port (`wlan_lwip.c`) call `netif->input` and free the pbuf on an error, and lwIP's `tcpip_inpkt`
 returns `ERR_MEM` when the mailbox or the message pool is full without counting it. That the hook itself

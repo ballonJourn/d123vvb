@@ -38,9 +38,9 @@ test('a forwarding queue that refuses frames: arrived still counts them, refused
   assert.ok(out.measured.e0RxDrop > 20);
 });
 
-test('the WiFi driver refusing frames: packets accepted at e0 never leave w1', async () => {
+test('the WiFi driver refusing frames: packets accepted at e01 never leave w03', async () => {
   const r = await rig({ d133: { w1Loss: 0.15 }, seed: 6 }); const out = await r.run(); r.close();
-  assert.equal(status(out, 'forwarded'), 'warn'); assert.match(text(out, 'forwarded'), /never left w03.*refused by the driver/);
+  assert.equal(status(out, 'forwarded'), 'warn'); assert.match(text(out, 'forwarded'), /only \d+ of 300 packets left w03; the driver refused \d+/);
   assert.equal(status(out, 'refused'), 'warn');
 });
 
@@ -87,4 +87,37 @@ test('older names (e0 / w1) work as well, and an explicit name wins over the aut
   assert.equal(a.verdict, 'pass'); assert.equal(b.verdict, 'pass');
   const r2 = await rig(); const wrong = await r2.run({ ingress: 'e9' }); r2.close();
   assert.equal(wrong.verdict, 'fail'); assert.match(wrong.checks[0].text, /"e9"/);
+});
+
+// ---- the first run on the real board (e01 / w03): 1000 sent, 465 other packets arrived on the Ethernet side ----
+const REAL = (lwipAfter) => ({
+  before: { uptime_ms: 679000, ip_forwarded: 5000, lwip: { stats: 1, ip_rterr: 0, ip_drop: 0, ip_memerr: 0, ip_chkerr: 0, ip_lenerr: 0, link_drop: 0, link_memerr: 0 },
+            ifs: [{ name: 'w03', ip: '192.168.169.1', up: 1, ...Z }, { name: 'e01', ip: '192.168.1.1', up: 1, ...Z }] },
+  after:  { uptime_ms: 682500, ip_forwarded: 6000, lwip: { stats: 1, ip_rterr: 0, ip_drop: 0, ip_memerr: 0, ip_chkerr: 0, ip_lenerr: 0, link_drop: 0, link_memerr: 0, ...lwipAfter },
+            ifs: [{ name: 'w03', ip: '192.168.169.1', up: 1, ...Z, tx_pkts: 1000, tx_bytes: 1000 * 1074 }, { name: 'e01', ip: '192.168.1.1', up: 1, ...Z, rx_pkts: 1465, rx_bytes: 1465 * 778 }] },
+});
+
+test('real board, first run: 465 foreign packets on e01 do not hide that all 1000 were forwarded with a 14 byte Ethernet header', () => {
+  const r = evaluate({ ...REAL({}), count: 1000, datagramBytes: 1032 });
+  assert.equal(status(r, 'forwarded'), 'pass', text(r, 'forwarded'));                 // 1000 of 1000 left w03
+  assert.equal(status(r, 'l2'), 'pass'); assert.equal(r.measured.l2Measured, 14); assert.equal(r.measured.l2From, 'w03');   // measured where it is clean
+  assert.doesNotMatch(text(r, 'l2'), /-282|D133_L2_BYTES=-/);                          // the nonsensical suggestion of the first version
+  assert.equal(status(r, 'arrived'), 'warn'); assert.match(text(r, 'arrived'), /465 more than sent, averaging 141 bytes/);
+  assert.equal(r.checks.find(c => c.id === 'symmetry'), undefined);                    // not compared while the ingress side is mixed
+  assert.equal(r.verdict, 'warn');
+});
+
+test('the extra packets are explained from lwIP\'s counters: "no route" points at the PC using the board as default gateway', () => {
+  const r = evaluate({ ...REAL({ ip_rterr: 465 }), count: 1000, datagramBytes: 1032 });
+  assert.match(text(r, 'arrived'), /\+465 "no route".*default gateway/);
+  const t = evaluate({ ...REAL({}), count: 1000, datagramBytes: 1032 });
+  assert.match(text(t, 'arrived'), /took them itself/);                                // no routing errors: ARP, ICMP, broadcasts, connections to the board
+  const off = REAL({}); off.after.lwip = { stats: 0 };
+  assert.match(text(evaluate({ ...off, count: 1000, datagramBytes: 1032 }), 'arrived'), /lwIP counters are off/);
+});
+
+test('framing is never guessed from a mixed average', () => {
+  const mixed = REAL({}); mixed.after.ifs[0].tx_pkts = 1300; mixed.after.ifs[0].tx_bytes = 1300 * 900;   // egress also mixed
+  const r = evaluate({ ...mixed, count: 1000, datagramBytes: 1032 });
+  assert.equal(status(r, 'l2'), 'warn'); assert.match(text(r, 'l2'), /cannot be measured now/); assert.equal(r.measured.l2Measured, undefined);
 });
