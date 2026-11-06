@@ -18,6 +18,7 @@ import { StreamSender } from './sender.mjs';
 import { StreamReceiver } from './receiver.mjs';
 import * as P from './protocol.mjs';
 import { calibrate } from './calibrate.mjs';
+import { createPrinter } from './printer.mjs';
 
 export function parseRate(text) {
   const m = /^(\d+(?:\.\d+)?)\s*([kKmMgG]?)$/.exec(String(text).trim());
@@ -56,7 +57,9 @@ function feedStdin(tx) {
 
 export async function main(argv) {
   const { cmd, flags: f } = parseArgs(argv);
-  const json = !!f.json, t0 = Date.now(), out = o => console.log(json ? JSON.stringify(o) : o.line);
+  const printer = createPrinter();                      // a stuck console (a click in the window) must not stop the stream
+  const say = line => printer.log(line);
+  const json = !!f.json, t0 = Date.now(), out = o => say(json ? JSON.stringify(o) : o.line);
   const duration = f.duration ? Number(f.duration) * 1000 : Infinity;
   let stop = () => {};
   const done = new Promise(res => { stop = res; });
@@ -67,7 +70,7 @@ export async function main(argv) {
     const rx = new StreamReceiver({ port: Number(f.port ?? 5600), host: '0.0.0.0', reportMs: Number(f['report-ms'] ?? 500), frameQueue: Number(f.queue ?? 8), onFrame: () => {} });
     rx.on('error', e => { console.error(e.message); process.exit(1); });
     const port = await rx.start();
-    if (!json) console.log(`receiving on UDP ${port}`);
+    if (!json) say(`receiving on UDP ${port}`);
     let prev = null;
     const timer = setInterval(() => {
       const s = rx.stats(); if (!s) return;
@@ -78,7 +81,7 @@ export async function main(argv) {
             line: `t=${String(Math.round((now - t0) / 1000)).padStart(3)}s  recv ${fmt(mbit(wire))} Mbit/s  loss ${rep?.lossFraction == null ? '-' : fmt(rep.lossFraction * 100, 1)} % (${s.lost}/${s.expected})  reordered ${s.reordered}  jitter ${fmt(s.jitterUs / 1000)} ms  frames ${s.framesOk} ok / ${s.framesDropped} dropped  queue drops ${s.queueDropped}` });
       prev = { t: now, bytes: s.bytes, packets: s.packets };
     }, 1000);
-    await done; clearInterval(timer); rx.stop(); return 0;
+    await done; clearInterval(timer); rx.stop(); await printer.close(); return 0;
   }
 
   if (cmd === 'send') {
@@ -92,11 +95,11 @@ export async function main(argv) {
       pacing: Number(f.pacing ?? 0.5), mtuPayload: Number(f.mtu ?? P.MAX_PAYLOAD), adaptive: mode === 'adaptive',
       ramp: mode === 'ramp' ? { startBps: parseRate(f['ramp-start'] ?? '1M'), stepBps: parseRate(f['ramp-step'] ?? '1M'), maxBps: max ?? parseRate('30M'), stepMs: Number(f['ramp-ms'] ?? 3000), lossThreshold: Number(f['loss-threshold'] ?? 0.01) } : null });
     tx.on('socket-error', e => console.error(e.message));
-    tx.on('stall', e => { if (!json) console.log(`  ! this PC paused the sender for ${(e.ms / 1000).toFixed(1)} s (not the network; the step is measured again). A click inside this console window does that: press Esc. Power saving and antivirus can too.`); });
-    tx.on('adapt', e => { if (!json) console.log(`  rate -> ${fmt(e.bitrate / 1e6)} Mbit/s (${e.why})`); });
+    tx.on('stall', e => { if (!json) say(`  ! this PC paused the sender for ${(e.ms / 1000).toFixed(1)} s (not the network; the step is measured again). A click inside this console window does that: press Esc. Power saving and antivirus can too.`); });
+    tx.on('adapt', e => { if (!json) say(`  rate -> ${fmt(e.bitrate / 1e6)} Mbit/s (${e.why})`); });
     tx.on('ramp-done', e => {
-      if (json) console.log(JSON.stringify({ event: 'ramp-done', ...e }));
-      else console.log(e.reason === 'no-data' ? 'ramp stopped (no-data): the receiver saw no datagrams during a step. Is `recv` running on the other PC and reachable (firewall, route)? This is not a loss measurement.'
+      if (json) say(JSON.stringify({ event: 'ramp-done', ...e }));
+      else say(e.reason === 'no-data' ? 'ramp stopped (no-data): the receiver saw no datagrams during a step. Is `recv` running on the other PC and reachable (firewall, route)? This is not a loss measurement.'
         : e.knee === null && e.delayKnee === null ? `ramp finished (${e.reason}): no sustainable rate found`
         : [`ramp finished (${e.reason}): ${e.knee === null ? 'no loss-free step' : `loss begins above ${fmt(e.knee / 1e6)} Mbit/s`} (application bitrate)`,
            e.delayKnee === null ? '  the round trip did not rise before the loss' : `  the round trip starts to rise above ${fmt(e.delayKnee / 1e6)} Mbit/s: a queue builds before anything is lost`,
@@ -106,26 +109,27 @@ export async function main(argv) {
     });
     await tx.start();
     if (source === 'stdin') feedStdin(tx);
-    if (!json) console.log(`sending to ${host}:${port}  mode ${mode}${source === 'stdin' ? '  source stdin' : `  ${fmt(tx.bitrate / 1e6)} Mbit/s ${tx.opts.fps} fps`}`);
+    if (!json) say(`sending to ${host}:${port}  mode ${mode}${source === 'stdin' ? '  source stdin' : `  ${fmt(tx.bitrate / 1e6)} Mbit/s ${tx.opts.fps} fps`}`);
     const timer = setInterval(() => {
       const s = tx.stats(), h = tx.history, r = s.lastReport, now = Date.now();
       out({ t: Math.round((now - t0) / 1000), role: 'send', mbit: mbit(h.txWire.at(-1) ?? null), targetMbit: s.targetBps / 1e6, loss: r?.lossFraction ?? null, jitterMs: r ? r.jitterUs / 1000 : null,
             rttMs: s.rttMs, queueDropped: s.queueDropped, sendErrors: s.sendErrors,
             line: `t=${String(Math.round((now - t0) / 1000)).padStart(3)}s  sent ${fmt(mbit(h.txWire.at(-1) ?? null))} Mbit/s  target ${fmt(s.targetBps / 1e6)}  loss ${r?.lossFraction == null ? '-' : fmt(r.lossFraction * 100, 1)} %  jitter ${r ? fmt(r.jitterUs / 1000) : '-'} ms  rtt ${fmt(s.rttMs)} ms  queue drops ${s.queueDropped}${s.reports ? '' : '  (no report from the receiver yet)'}` });
     }, 1000);
-    await done; clearInterval(timer); tx.stop(); return 0;
+    await done; clearInterval(timer); tx.stop(); await printer.close(); return 0;
   }
   if (cmd === 'calibrate') {
     const hp = (v, dflt, name) => { const m = /^([^:]+)(?::(\d+))?$/.exec(v ?? ''); if (!m) throw new Error(`calibrate needs ${name}`); return [m[1], Number(m[2] ?? dflt)]; };
     const to = f.to && /^[^:]+:\d+$/.test(f.to) ? [f.to.slice(0, f.to.lastIndexOf(':')), Number(f.to.slice(f.to.lastIndexOf(':') + 1))] : null;
     if (!to) throw new Error('calibrate needs --to PC2_ADDRESS:PORT (any free UDP port on the other side of the board)');
     const r = await calibrate({ to, board: hp(f.board, 9001, '--board HOST[:STATPORT]'), count: Number(f.count ?? 1000), payload: Number(f.payload ?? 1000), pps: Number(f.pps ?? 500),
-      ingress: f.ingress, egress: f.egress, log: m => { if (!json) console.log(m); } });
-    if (json) console.log(JSON.stringify(r));
+      ingress: f.ingress, egress: f.egress, log: m => { if (!json) say(m); } });
+    if (json) say(JSON.stringify(r));
     else {
-      for (const c of r.checks) console.log(`${{ pass: 'PASS', warn: 'WARN', fail: 'FAIL' }[c.status]}  ${c.id.padEnd(10)} ${c.text}`);
-      console.log(`\nverdict: ${r.verdict.toUpperCase()}  (${r.sent} sent in ${r.seconds.toFixed(1)} s of board time${r.sendErrors ? `, ${r.sendErrors} send errors on this PC` : ''})`);
+      for (const c of r.checks) say(`${{ pass: 'PASS', warn: 'WARN', fail: 'FAIL' }[c.status]}  ${c.id.padEnd(10)} ${c.text}`);
+      say(`\nverdict: ${r.verdict.toUpperCase()}  (${r.sent} sent in ${r.seconds.toFixed(1)} s of board time${r.sendErrors ? `, ${r.sendErrors} send errors on this PC` : ''})`);
     }
+    await printer.close();
     return r.verdict === 'fail' ? 1 : 0;
   }
   console.error('usage: cli.mjs send --to HOST:PORT [...]  |  cli.mjs recv --port PORT [...]  |  cli.mjs calibrate --to HOST:PORT --board HOST   (see the header of this file)');

@@ -144,6 +144,9 @@ export class StreamSender extends EventEmitter {
 
   // ----------------------------------------------------------------- feedback
   handleReport(buf, at = this.clock()) {
+    // After a pause the reports that piled up are handled in the poll phase, which runs BEFORE the timers of the
+    // next loop turn: the lag timer has not had its say yet. Look now, or the first of them is taken as good data.
+    this.checkLag();
     const r = P.decode(buf);
     if (!r || r.type !== 'report' || r.streamId !== this.opts.streamId) return;
     const nowMs = performance.now();
@@ -182,6 +185,7 @@ export class StreamSender extends EventEmitter {
 
   /** Called every 250 ms: no reports means the receiver or the path is gone. */
   watch() {
+    this.checkLag();
     const now = performance.now(), age = now - Math.max(this.lastReportAtMs ?? this.startedAtMs, this.lag.resumeAt);   // a pause of this process is not silence
     if (this.adapt) { const before = this.bitrate; this.setBitrate(this.adapt.onSilence(age, now)); if (this.bitrate !== before) this.emit('adapt', { bitrate: this.bitrate, why: this.adapt.last }); }
     if (this.ramp) { this.ramp.onSilence(now); this.stepRamp(this.ramp.rate); }

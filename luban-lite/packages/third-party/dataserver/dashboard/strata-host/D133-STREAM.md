@@ -111,12 +111,15 @@ Interface names: lwIP names an interface with two letters and an index, so on th
   and a rate-limit step in which nothing arrived ends the search with `no-data`, not `loss`.
 * **Rate-limit search noise guards.** A step is judged only after 300 datagrams were accounted for and counts as loss
   only if at least 5 were lost: at 1 Mbit/s three stray WiFi losses in 3 s are 1.1 %, not an overloaded path.
-* **Pauses of the sender's own process.** The first real rate-limit run showed two 3 s gaps in the output with the
-  sent rate near zero and the round trip jumping to ~1 s: the Node process itself had been paused (on Windows
-  typically a click inside the console window; also power saving or antivirus), the reports piled up and were
-  handled late. A 100 ms timer now measures how late it runs; a lag above 500 ms emits `stall`, the reports handled
-  within a second of any lag above 50 ms are left out of the round trip, adaptation and the ramp, a ramp step is
-  measured again, and a pause is not counted as "no reports".
+* **Pauses of the sender's own process.** Two of the first three real rate-limit runs had gaps of 3 s and 9.4 s with
+  the sent rate at zero: the Node process was paused (on Windows typically a click in the console window; also
+  power saving or antivirus). The reports that piled up are handled in the poll phase, which runs BEFORE the timers
+  of the next loop turn, so the lag timer alone is too late (the 9.4 s run recorded a 9266 ms "round trip" and skipped
+  a ramp step): the pause check also runs at the start of every report and of the 250 ms watch. A lag above 50 ms
+  keeps the reports of the next second out of the round trip, adaptation and the ramp; above 500 ms emits `stall`,
+  measures the ramp step again, and is not counted as "no reports". The CLI's console output goes through a pipe to a
+  child process on a Windows console, so a stuck console blocks the child, not the stream (`printer.mjs`,
+  D133_PRINT_CHILD=0 / 1).
 * **Delay comes before loss.** A path offered a little too much first builds a queue (the round trip rises)
   and drops only when the queue is full, so the rate-limit search reports two knees: where loss begins and where
   the round trip starts to rise (more than 30 ms above the lowest step and still risen at the end of the search;
