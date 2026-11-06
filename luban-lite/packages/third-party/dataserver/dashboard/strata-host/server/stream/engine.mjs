@@ -79,7 +79,7 @@ export function createStreamEngine({ peekBoard = () => null, ingressIf, egressIf
       r.tx = tx;
       tx.on('adapt', e => note(r, `rate ${mbit(e.bitrate)} (${e.why})`));
       tx.on('ramp-step', e => note(r, `ramp step: ${mbit(e.bitrate)}`));
-      tx.on('ramp-done', e => { r.rampResult = e; note(r, e.reason === 'no-data' ? 'ramp stopped (no-data): the receiver saw nothing during a step, so nothing was measured' : e.knee === null ? `ramp finished (${e.reason}): no sustainable rate found` : `ramp finished (${e.reason}): loss begins above ${mbit(e.knee)}`); });
+      tx.on('ramp-done', e => { r.rampResult = e; note(r, e.reason === 'no-data' ? 'ramp stopped (no-data): the receiver saw nothing during a step, so nothing was measured' : e.knee === null && e.delayKnee === null ? `ramp finished (${e.reason}): no sustainable rate found` : `ramp finished (${e.reason}): ${e.knee === null ? 'no loss-free step' : `loss begins above ${mbit(e.knee)}`}${e.delayKnee === null ? '' : `; the round trip starts to rise above ${mbit(e.delayKnee)}`}${e.recommend === null ? '' : `; suggested sustained rate about ${mbit(e.recommend)}`}`); });
       tx.on('stall', e => note(r, `this PC paused the sender for ${(e.ms / 1000).toFixed(1)} s (not the network); the measurement restarts`));
       tx.on('socket-error', e => { r.error = e.message; });
       tx.on('send-error', e => { r.error = `send failed: ${e.code ?? e.message}`; });

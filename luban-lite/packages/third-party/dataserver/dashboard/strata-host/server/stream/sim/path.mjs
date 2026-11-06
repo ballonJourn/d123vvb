@@ -24,7 +24,7 @@ export async function createPath({ receiver, port = 0, cable = {}, d133 = {}, wi
   const idx = { cable: 0, d133: 0, wifi: 0 };
   const timers = new Set();
   const bucket = { tokens: d133.burstBytes ?? 30000, t: performance.now() };
-  let sender = null;
+  let sender = null, shaperFree = 0;
 
   const later = (ms, fn) => { if (ms <= 0) return fn(); const t = setTimeout(() => { timers.delete(t); fn(); }, ms); timers.add(t); };
   const delay = o => (o.delayMs ?? 0) + (o.jitterMs ? rnd() * o.jitterMs : 0);
@@ -54,7 +54,13 @@ export async function createPath({ receiver, port = 0, cable = {}, d133 = {}, wi
         if (d133.w1Loss && rnd() < d133.w1Loss) { c.w1TxErr++; return; }
         c.w1TxPkts++; c.w1TxBytes += wire;
         if (lost(wifi, idx.wifi++)) { c.wifiDrops++; return; }
-        later(delay(wifi), () => { c.delivered++; toReceiver.send(buf, receiver.port, receiver.host ?? '127.0.0.1'); });
+        let queued = 0;
+        if (wifi.shaperBps) {                                         // a FIFO bottleneck: delay grows with the queue, then it tail-drops
+          const now = performance.now(), start = Math.max(now, shaperFree), tx = wire * 8 / wifi.shaperBps * 1000;
+          if (start - now > (wifi.queueMs ?? 300)) { c.wifiDrops++; return; }
+          shaperFree = start + tx; queued = start + tx - now;
+        }
+        later(queued + delay(wifi), () => { c.delivered++; toReceiver.send(buf, receiver.port, receiver.host ?? '127.0.0.1'); });
       });
     });
   });

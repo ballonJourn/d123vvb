@@ -211,3 +211,20 @@ test('a pause of the sender is not "no reports": an adaptive sender does not bac
     assert.notEqual(tx.adapt.last, 'stale'); assert.ok(tx.bitrate >= 1.9e6, `rate ${tx.bitrate}`);
   } finally { tx.stop(); rx.stop(); path.close(); }
 });
+
+test('a queueing bottleneck: the round trip rises before the first loss and the search reports both knees', async () => {
+  const rx = new StreamReceiver({ port: 0, host: '127.0.0.1', reportMs: 100 }); await rx.start();
+  const path = await createPath({ receiver: { port: rx.port }, wifi: { shaperBps: 6e6, queueMs: 400 }, seed: 12 });
+  const tx = new StreamSender({ host: '127.0.0.1', port: path.port, fps: 30,
+    ramp: { startBps: 2e6, stepBps: 1e6, maxBps: 10e6, stepMs: 1200, minReports: 3, settleReports: 1, delayRiseMs: 25 } });
+  try {
+    await tx.start();
+    const out = await Promise.race([new Promise(res => tx.on('ramp-done', res)), sleep(30_000).then(() => null)]);
+    assert.ok(out, 'the ramp did not finish');
+    assert.equal(out.reason, 'loss');
+    assert.ok(out.delayKnee !== null, `no delay knee: ${JSON.stringify(out.results.map(r => [r.bps / 1e6, r.rttEnd]))}`);
+    assert.ok(out.delayKnee <= out.knee, `delay knee ${out.delayKnee} after loss knee ${out.knee}`);
+    assert.ok(out.knee >= 4e6 && out.knee <= 7e6, `knee ${out.knee}`);
+    assert.ok(out.recommend <= out.delayKnee * 0.7 + 1e5 && out.recommend > 0);
+  } finally { tx.stop(); rx.stop(); path.close(); }
+});

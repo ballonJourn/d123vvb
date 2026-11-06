@@ -185,3 +185,45 @@ test('ramp: invalidate() throws away what the step collected, so a pause of the 
   r.onReport(rep(100, 0), 2200); r.onReport(rep(100, 0), 2700);
   assert.equal(r.done, false); assert.equal(r.rate, 3 * M);                      // judged on the clean reports only
 });
+
+/** a path whose round trip is `rtt(step)` ms and whose loss is `loss(step)`; drives the ramp like the sender does */
+function runDelayRamp({ rtt, loss, steps = 8, opts = {} }) {
+  const r = new RampSearch({ startBps: 2 * M, stepBps: 1 * M, maxBps: (2 + steps) * M, stepMs: 1000, minReports: 2, settleReports: 1, minExpected: 0, minLost: 5, ...opts });
+  let t = 0; r.begin(t);
+  while (!r.done && t < 600_000) {
+    t += 500; const step = Math.round((r.rate - 2 * M) / M);
+    r.noteRtt(rtt(step, t)); r.onReport(rep(1000, Math.round(1000 * loss(step))), t);
+  }
+  return r;
+}
+
+test('ramp: the round trip rises before anything is lost, and the delay knee comes before the loss knee', () => {
+  // 20 ms up to step 4 (6 Mbit/s); a growing queue from step 5; loss only at step 7
+  const r = runDelayRamp({ rtt: step => step <= 4 ? 20 + (step % 2) : 20 + (step - 4) * 80, loss: step => step >= 7 ? 0.2 : 0 });
+  assert.equal(r.reason, 'loss'); assert.equal(r.knee, 8 * M);                  // step 7 = 9 Mbit/s lost, so 8 is the last clean one
+  assert.equal(r.delayKnee, 6 * M);                                              // step 5 (7 Mbit/s) is the first risen step
+  assert.equal(r.recommend, 4.2 * M);                                            // 70 % of the lower of 6 and 8, rounded down to 0.1
+});
+
+test('ramp: one stray delay spike is not a delay knee', () => {
+  const r = runDelayRamp({ rtt: (step, t) => step === 3 && t % 1000 === 0 ? 200 : 25, loss: step => step >= 6 ? 0.2 : 0 });
+  assert.equal(r.delayKnee, null);                                               // the round trip came back down: no persistent rise
+  assert.equal(r.recommend, Math.floor(r.knee * 0.7 / 1e5) * 1e5);
+});
+
+test('ramp: no round trip samples means no delay knee (not a guess)', () => {
+  const r = new RampSearch({ startBps: 2 * M, stepBps: 1 * M, maxBps: 6 * M, stepMs: 500, minReports: 1, settleReports: 0, minExpected: 0, minLost: 0 });
+  r.begin(0); r.onReport(rep(100, 0), 500); r.onReport(rep(100, 50), 1000);
+  assert.equal(r.reason, 'loss'); assert.equal(r.delayKnee, null); assert.equal(r.recommend, Math.floor(2 * M * 0.7 / 1e5) * 1e5);
+});
+
+test('ramp: the user\'s second real run: 6..11 Mbit/s, round trip 20-50 ms then 94, 155, 274, 343 ms, loss 42 % at the end', () => {
+  // per step: the median / end-of-step round trip in ms read off the run (6 7 8 9 10 11 Mbit/s)
+  const rttEnd = [22, 26, 50, 24, 94, 343], rttMed = [26, 26, 37, 35, 26, 215], lossAt = [0, 0, 0, 0, 0, 0.425];
+  const r = new RampSearch({ startBps: 6 * M, stepBps: 1 * M, maxBps: 20 * M, stepMs: 1000, minReports: 1, settleReports: 0, minExpected: 0, minLost: 5, delayRiseMs: 30 });
+  r.begin(0);
+  for (let i = 0; i < 6; i++) { const t = (i + 1) * 1000; r.rtts = [rttMed[i], rttEnd[i] - 1, rttEnd[i]]; r.onReport(rep(1000, Math.round(1000 * lossAt[i])), t); }
+  assert.equal(r.reason, 'loss'); assert.equal(r.knee, 10 * M);                  // "loss begins above 10 Mbit/s", as the tool printed
+  assert.equal(r.delayKnee, 9 * M);                                              // the round trip was already rising at 10 Mbit/s
+  assert.equal(r.recommend, 6.3 * M);                                            // 70 % of 9 Mbit/s
+});

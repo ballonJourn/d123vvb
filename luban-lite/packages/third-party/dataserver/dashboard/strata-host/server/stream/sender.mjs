@@ -149,7 +149,7 @@ export class StreamSender extends EventEmitter {
     const nowMs = performance.now();
     if (r.echoSendTs > 0 && nowMs >= this.lag.until) {
       const rtt = at - r.echoSendTs - r.echoDelayUs;
-      if (rtt >= 0) this.rttUs = this.rttUs === null ? rtt : this.rttUs + (rtt - this.rttUs) / 4;   // the first sample often includes ARP resolution; a quarter weight forgets it in a few reports
+      if (rtt >= 0) { this.rttUs = this.rttUs === null ? rtt : this.rttUs + (rtt - this.rttUs) / 4; this.ramp?.noteRtt(rtt / 1000); }   // the first sample often includes ARP resolution; a quarter weight forgets it in a few reports
     }
     this.reports++; this.lastReportAtMs = nowMs;
     this.lastReport = { ...r, lossFraction: r.expected > 0 ? r.lost / r.expected : null, at: nowMs };   // null: the receiver saw nothing in that interval
@@ -163,7 +163,7 @@ export class StreamSender extends EventEmitter {
     if (rate !== this.bitrate) { this.setBitrate(rate); this.emit('ramp-step', { bitrate: this.bitrate, results: this.ramp.results }); }
     if (this.ramp.done && !this.rampDoneEmitted) {
       this.rampDoneEmitted = true;
-      this.emit('ramp-done', { knee: this.ramp.knee, reason: this.ramp.reason, results: this.ramp.results });
+      this.emit('ramp-done', { knee: this.ramp.knee, delayKnee: this.ramp.delayKnee, recommend: this.ramp.recommend, reason: this.ramp.reason, results: this.ramp.results });
     }
   }
 
@@ -215,7 +215,7 @@ export class StreamSender extends EventEmitter {
       reportAgeMs: this.lastReportAtMs === null ? null : Math.round(now - this.lastReportAtMs),
       lastReport: r ? { ...r } : null,
       adapt: this.adapt ? { last: this.adapt.last, hold: this.adapt.hold } : null,
-      ramp: this.ramp ? { done: this.ramp.done, knee: this.ramp.knee, reason: this.ramp.reason, results: this.ramp.results, rate: this.ramp.rate } : null,
+      ramp: this.ramp ? { done: this.ramp.done, knee: this.ramp.knee, delayKnee: this.ramp.delayKnee, recommend: this.ramp.recommend, reason: this.ramp.reason, results: this.ramp.results, rate: this.ramp.rate } : null,
     };
   }
 }

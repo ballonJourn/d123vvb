@@ -97,7 +97,11 @@ export async function main(argv) {
     tx.on('ramp-done', e => {
       if (json) console.log(JSON.stringify({ event: 'ramp-done', ...e }));
       else console.log(e.reason === 'no-data' ? 'ramp stopped (no-data): the receiver saw no datagrams during a step. Is `recv` running on the other PC and reachable (firewall, route)? This is not a loss measurement.'
-        : e.knee === null ? `ramp finished (${e.reason}): no sustainable rate found` : `ramp finished (${e.reason}): loss begins above ${fmt(e.knee / 1e6)} Mbit/s (application bitrate)`);
+        : e.knee === null && e.delayKnee === null ? `ramp finished (${e.reason}): no sustainable rate found`
+        : [`ramp finished (${e.reason}): ${e.knee === null ? 'no loss-free step' : `loss begins above ${fmt(e.knee / 1e6)} Mbit/s`} (application bitrate)`,
+           e.delayKnee === null ? '  the round trip did not rise before the loss' : `  the round trip starts to rise above ${fmt(e.delayKnee / 1e6)} Mbit/s: a queue builds before anything is lost`,
+           e.recommend === null ? '' : `  suggested sustained rate: about ${fmt(e.recommend / 1e6, 1)} Mbit/s (70 % of the lower of the two)`,
+           ...e.results.map(r => `  step ${fmt(r.bps / 1e6, 1).padStart(5)} Mbit/s  loss ${fmt(r.loss * 100, 1).padStart(5)} %  round trip ${r.rttMed === null ? '-' : fmt(r.rttMed, 0)} ms (end of step ${r.rttEnd === null ? '-' : fmt(r.rttEnd, 0)} ms)`)].filter(Boolean).join('\n'));
       stop();
     });
     await tx.start();

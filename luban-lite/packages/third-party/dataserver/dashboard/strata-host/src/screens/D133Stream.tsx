@@ -13,7 +13,7 @@ import { tr } from '../lib/i18n';
 import { useEffect, useState } from 'react';
 import { api } from '../lib/client';
 import { ReferenceSpark } from '../components/charts';
-import { Bar, Btn, Empty, Pill } from '../components/ui';
+import { Btn, Empty, Pill } from '../components/ui';
 import { MonitorMetric } from './Monitor';
 import type { PathSegment, Series, StreamState } from './d133-types';
 import { bps, last, ms, num, pct, pps } from './d133-format';
@@ -144,16 +144,22 @@ export function D133Stream() {
 
     {tr(send && mode === 'ramp' && s?.ramp ? <section className="st-card">
       <div className="section-toolbar"><h2 className="h4">{tr('Rate limit search')}</h2>
-        <Pill tone={s.ramp.done ? (s.ramp.knee === null ? 'danger' : 'accent') : 'warn'} dot>{tr(s.ramp.done ? 'Finished' : 'Running')}</Pill></div>
-      {tr(s.ramp.done ? <p className="small">{s.ramp.reason === 'no-data' ? tr('The receiver saw nothing during a step, so nothing was measured. Is the receiver running and reachable?') : s.ramp.knee === null ? tr(`No sustainable rate found (${s.ramp.reason}).`) : tr(`Loss begins above ${bps(s.ramp.knee)} (application bitrate). The sender stays at that rate.`)}</p>
-                       : <p className="small muted">{tr(`Testing ${bps(s.ramp.rate)} \u2026`)}</p>)}
+        <Pill tone={s.ramp.done ? (s.ramp.knee === null && s.ramp.delayKnee == null ? 'danger' : 'accent') : 'warn'} dot>{tr(s.ramp.done ? 'Finished' : 'Running')}</Pill></div>
+      {tr(s.ramp.done ? (s.ramp.reason === 'no-data' ? <p className="small">{tr('The receiver saw nothing during a step, so nothing was measured. Is the receiver running and reachable?')}</p>
+        : s.ramp.knee === null && s.ramp.delayKnee == null ? <p className="small">{tr(`No sustainable rate found (${s.ramp.reason}).`)}</p>
+        : <div className="stack">
+            <p className="small">{tr(s.ramp.knee === null ? 'No loss-free step.' : `Loss begins above ${bps(s.ramp.knee)} (application bitrate).`)}</p>
+            <p className="small">{tr(s.ramp.delayKnee == null ? 'The round trip did not rise before the loss.' : `The round trip starts to rise above ${bps(s.ramp.delayKnee)}: a queue builds before anything is lost.`)}</p>
+            {s.ramp.recommend != null ? <p className="small"><strong>{tr(`Suggested sustained rate: about ${bps(s.ramp.recommend)}`)}</strong>{tr(' (70 % of the lower of the two). The sender stays at the loss-free rate until you stop it.')}</p> : null}
+          </div>)
+        : <p className="small muted">{tr(`Testing ${bps(s.ramp.rate)} \u2026`)}</p>)}
       <div className="st-tablewrap"><table className="st-table native-performance-table">
-        <thead><tr><th>{tr('Step')}</th><th>{tr('Rate')}</th><th>{tr('Loss')}</th><th>{tr('Datagrams')}</th></tr></thead>
+        <thead><tr><th>{tr('Step')}</th><th>{tr('Rate')}</th><th>{tr('Loss')}</th><th>{tr('Datagrams')}</th><th>{tr('Round trip')}</th></tr></thead>
         <tbody>{tr(s.ramp.results.length ? s.ramp.results.map((r, i) => <tr key={i}><td className="num">{i + 1}</td><td className="num">{tr(bps(r.bps))}</td>
-          <td><Pill tone={r.loss > 0.01 ? 'danger' : 'accent'} dot>{tr(pct(r.loss))}</Pill></td><td className="num">{tr(`${r.lost} lost of ${r.expected}`)}</td></tr>)
-          : <tr><td colSpan={4}>{tr('The first step is still being measured.')}</td></tr>)}</tbody>
+          <td><Pill tone={r.loss > 0.01 ? 'danger' : 'accent'} dot>{tr(pct(r.loss))}</Pill></td><td className="num">{tr(`${r.lost} lost of ${r.expected}`)}</td>
+          <td className="num">{tr(num(r.rttMed) ? `${r.rttMed.toFixed(0)} ms` : '\u2014')}<small>{tr(num(r.rttEnd) ? `end of step ${r.rttEnd.toFixed(0)} ms` : '')}</small></td></tr>)
+          : <tr><td colSpan={5}>{tr('The first step is still being measured.')}</td></tr>)}</tbody>
       </table></div>
-      {tr(s.ramp.done && s.ramp.knee !== null ? <Bar label={tr('Knee against the maximum')} value={s.maxBps ? s.ramp.knee / s.maxBps * 100 : 0}/> : null)}
     </section> : null)}
 
     {tr(running && st?.events.length ? <section className="st-card"><h2 className="h4">{tr('Stream events')}</h2>

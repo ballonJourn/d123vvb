@@ -117,6 +117,11 @@ Interface names: lwIP names an interface with two letters and an index, so on th
   handled late. A 100 ms timer now measures how late it runs; a lag above 500 ms emits `stall`, the reports handled
   within a second of any lag above 50 ms are left out of the round trip, adaptation and the ramp, a ramp step is
   measured again, and a pause is not counted as "no reports".
+* **Delay comes before loss.** A path offered a little too much first builds a queue (the round trip rises)
+  and drops only when the queue is full, so the rate-limit search reports two knees: where loss begins and where
+  the round trip starts to rise (more than 30 ms above the lowest step and still risen at the end of the search;
+  one spike is not a trend), and suggests 70 % of the lower. In the second real run the round trip went 94, 155,
+  274, 343 ms before 42.5 % loss appeared; the sustained rate is below the loss-free rate.
 * **Round trip** is smoothed with a quarter weight per report (the first sample often includes ARP resolution).
 * **Mbit/s** are application bits per second; the link carries about 5 % more.
 * **Windows timers.** The sender paces with Node timers; if the OS timer is coarse the fragments leave in
