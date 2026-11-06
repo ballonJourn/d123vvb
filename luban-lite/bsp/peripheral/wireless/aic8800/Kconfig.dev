@@ -33,6 +33,14 @@ menu "Wlan0 Parameter"
             bool "select rftest mode"
     endchoice
 
+    config AIC_WLAN_AP_BW_40M
+        bool "Access point channel width 40 MHz (default 20 MHz)"
+        default n
+        help
+          The soft AP is started with a 20 MHz channel. 40 MHz roughly doubles the PHY rate but needs a clean
+          band: try it on a 5 GHz channel (`wifi ap SSID PASSWORD 36`) once that works. The channel itself is
+          chosen at run time: `wifi ap SSID PASSWORD CHANNEL`, channel >= 36 is 5 GHz.
+
     config CONFIG_AIC8800_BT_SUPPORT
         bool "enable aic8800 BT support"
         default n

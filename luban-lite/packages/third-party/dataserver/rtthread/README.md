@@ -170,6 +170,26 @@ counted 1000; the `w03` counter averaged exactly 1074.0 bytes per packet = IP pa
 14 byte Ethernet header, so the counters include it. Not yet measured: the rate at which loss begins,
 and long-running stability.
 
+## WiFi access point: channel and band
+
+`wifi ap SSID [PASSWORD [CHANNEL]]` (kernel/.../wlan/wlan_cmd.c). Without a channel it is channel 6 on 2.4 GHz as
+before; a channel >= 36 is 5 GHz. The channels are those the AIC8800 driver accepts
+(`fdrv/layer_abstract/inc/wifi_def.h`): 2.4 GHz 1..13, 5 GHz 36 40 44 48 149 153 157 161 165 (no DFS channels);
+anything else is refused with a message. An access point that is already up on another channel is restarted on
+the new one. The boot command is `CONFIG_RTT_CMD_2_STR` in the defconfig.
+
+Why the AP was on 2.4 GHz channel 6: `rt_wlan_start_ap()` had `channel = 6` and `band = 2.4 GHz` written into it,
+and the AIC glue (`aic8800_softap`) already chooses the band from the channel number. The glue also hard-codes a
+20 MHz channel; `AIC_WLAN_AP_BW_40M` (menuconfig, AIC8800 wlan driver, default off) switches it to 40 MHz.
+
+What the source does not tell: whether the AIC8800D40L *hardware* has a 5 GHz radio. The SDK's driver is built with
+`USE_5G` and treats the D40L as the D80 family (`wifi_port.h`: `CHIP_SELECT_AIC8800D40L` -> `PRODUCT_ID_AIC8800D80`;
+only DC and DW have 5 GHz switched off in `rwnx_main.c`), but that is software. Try it:
+`wifi scan` on the board lists networks with their channel (a 5 GHz network seen = the radio receives 5 GHz), or start
+the AP on channel 36 or 149 and look at the PC (`netsh wlan show interfaces`: band and channel).
+Checked: the validation header on the PC (`tests/test_wlan_channel.py`), the three changed files and the AIC glue
+cross-compiled with the Luban-Lite flags, with and without the 40 MHz option (0 warnings; the 40 MHz object differs).
+
 ## PC side
 
 Windows / Linux, no compiler needed:

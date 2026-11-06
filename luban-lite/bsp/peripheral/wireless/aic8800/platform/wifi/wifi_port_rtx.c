@@ -218,7 +218,11 @@ rt_err_t aic8800_softap(struct rt_wlan_device *wlan, struct rt_ap_info *ap_info)
     ap_cfg.bcn_interval = 100;
     ap_cfg.hidden_ssid = ap_info->hidden;
     ap_cfg.band = (ap_info->channel >= 36) ? PHY_BAND_5G : PHY_BAND_2G4;
+#ifdef AIC_WLAN_AP_BW_40M
+    ap_cfg.type = PHY_CHNL_BW_40;       /* 40 MHz: about twice the PHY rate; untested, try it on a 5 GHz channel first */
+#else
     ap_cfg.type = PHY_CHNL_BW_20;
+#endif
     ap_cfg.channel = ap_info->channel;
     ap_cfg.enable_he = 1;
     ap_cfg.enable_acs = 0;

@@ -12,6 +12,7 @@
 #define __WLAN_MGNT_H__
 
 #include <wlan_dev.h>
+#include "wlan_ap_channel.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -104,6 +105,8 @@ int rt_wlan_get_rssi(void);
  * wifi ap mode interface
  */
 rt_err_t rt_wlan_start_ap(const char *ssid, const char *password);
+/* Same, on a chosen channel: 2.4 GHz 1..13 or 5 GHz 36 40 44 48 149 153 157 161 165 (see wlan_ap_channel.h). */
+rt_err_t rt_wlan_start_ap_channel(const char *ssid, const char *password, int channel);
 rt_err_t rt_wlan_start_ap_adv(struct rt_wlan_info *info, const char *password);
 rt_bool_t rt_wlan_ap_is_active(void);
 rt_err_t rt_wlan_ap_stop(void);

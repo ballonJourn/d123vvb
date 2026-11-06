@@ -9,6 +9,7 @@
  */
 
 #include <rtthread.h>
+#include <stdlib.h>
 #include <rthw.h>
 #include <wlan_mgnt.h>
 #include <wlan_cfg.h>
@@ -91,7 +92,7 @@ static int wifi_help(int argc, char *argv[])
     rt_kprintf("wifi help\n");
     rt_kprintf("wifi scan [SSID]\n");
     rt_kprintf("wifi join [SSID] [PASSWORD]\n");
-    rt_kprintf("wifi ap SSID [PASSWORD]\n");
+    rt_kprintf("wifi ap SSID [PASSWORD [CHANNEL]]   (default channel %d; channel >= 36 is 5 GHz)\n", RT_WLAN_AP_DEFAULT_CHANNEL);
     rt_kprintf("wifi disc\n");
     rt_kprintf("wifi ap_stop\n");
     rt_kprintf("wifi status\n");
@@ -505,6 +506,7 @@ static int wifi_ap(int argc, char *argv[])
 {
     const char *ssid = RT_NULL;
     const char *key = RT_NULL;
+    int channel = RT_WLAN_AP_DEFAULT_CHANNEL;
 
     if (argc == 3)
     {
@@ -515,12 +517,23 @@ static int wifi_ap(int argc, char *argv[])
         ssid = argv[2];
         key = argv[3];
     }
+    else if (argc == 5)
+    {
+        ssid = argv[2];
+        key = argv[3];
+        channel = atoi(argv[4]);
+    }
     else
     {
         return -1;
     }
 
-    rt_wlan_start_ap(ssid, key);
+    if (!rt_wlan_ap_channel_is_valid(channel))
+    {
+        rt_kprintf("channel %d is not supported: 2.4G 1..13, 5G 36 40 44 48 149 153 157 161 165\n", channel);
+        return -1;
+    }
+    rt_wlan_start_ap_channel(ssid, key, channel);
     return 0;
 }
 
