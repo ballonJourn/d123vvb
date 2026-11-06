@@ -110,7 +110,7 @@ export function D133Stream() {
           secondary={send ? { data: toMbit(h?.rxWire), label: 'Received at PC2', tone: 'var(--st-info)' } : undefined}/>}/>
       <MonitorMetric label={tr('Loss')} icon="link" source="from sequence numbers"
         value={pct(send ? rep?.lossFraction : s?.lossFraction)}
-        sub={send ? (rep ? `${rep.lost} lost of ${rep.expected} \u00b7 ${rep.reordered} reordered \u00b7 ${rep.duplicates} duplicates` : 'Waiting for the receiver\u2019s report')
+        sub={send ? (rep ? (rep.expected === 0 ? 'The receiver saw no datagrams in the last interval' : `${rep.lost} lost of ${rep.expected} \u00b7 ${rep.reordered} reordered \u00b7 ${rep.duplicates} duplicates`) : 'Waiting for the receiver\u2019s report')
                   : `${s?.lost ?? 0} lost of ${s?.expected ?? 0} \u00b7 ${s?.reordered ?? 0} reordered \u00b7 ${s?.duplicates ?? 0} duplicates`}
         chart={<ReferenceSpark label="Loss" primaryLabel="Loss" data={toPct(h?.loss)} unit="%" timestamps={t} tone="var(--st-danger)"/>}/>
       <MonitorMetric label={tr('Jitter')} icon="activity" source="RFC 3550"
@@ -145,7 +145,7 @@ export function D133Stream() {
     {tr(send && mode === 'ramp' && s?.ramp ? <section className="st-card">
       <div className="section-toolbar"><h2 className="h4">{tr('Rate limit search')}</h2>
         <Pill tone={s.ramp.done ? (s.ramp.knee === null ? 'danger' : 'accent') : 'warn'} dot>{tr(s.ramp.done ? 'Finished' : 'Running')}</Pill></div>
-      {tr(s.ramp.done ? <p className="small">{s.ramp.knee === null ? tr(`No sustainable rate found (${s.ramp.reason}).`) : tr(`Loss begins above ${bps(s.ramp.knee)} (application bitrate). The sender stays at that rate.`)}</p>
+      {tr(s.ramp.done ? <p className="small">{s.ramp.reason === 'no-data' ? tr('The receiver saw nothing during a step, so nothing was measured. Is the receiver running and reachable?') : s.ramp.knee === null ? tr(`No sustainable rate found (${s.ramp.reason}).`) : tr(`Loss begins above ${bps(s.ramp.knee)} (application bitrate). The sender stays at that rate.`)}</p>
                        : <p className="small muted">{tr(`Testing ${bps(s.ramp.rate)} \u2026`)}</p>)}
       <div className="st-tablewrap"><table className="st-table native-performance-table">
         <thead><tr><th>{tr('Step')}</th><th>{tr('Rate')}</th><th>{tr('Loss')}</th><th>{tr('Datagrams')}</th></tr></thead>

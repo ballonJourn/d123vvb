@@ -80,10 +80,18 @@ export function evaluate({ before, after, count, datagramBytes, ingress, egress,
   if (m.e0RxDrop > 0 || m.w1TxErr > 0) add('refused', 'warn', `${m.e0RxDrop} frames refused by the stack at ${ingress}, ${m.w1TxErr} by the driver at ${egress}: the board dropped at this gentle rate, so the forwarding path is already short of buffers`);
   else add('refused', 'pass', 'no frame was refused at the calibration rate');
 
-  if (clean(arrived) && clean(m.w1TxPkts) && m.e0RxPkts > 0) {
+  if (clean(arrived) && clean(m.w1TxPkts) && m.e0RxPkts > 0 && m.w1TxPkts > 0) {
+    // Compare the framing without letting a few extra small packets (ARP, ICMP) move the average: if the
+    // ingress side saw some packets the egress did not, they account for the difference in bytes, and what
+    // matters is whether THEIR average is a real frame size. With equal packet counts the averages are compared.
+    const extraPkts = m.e0RxPkts - m.w1TxPkts, extraBytes = m.e0RxBytes - m.w1TxBytes;
     const a = m.e0RxBytes / m.e0RxPkts, b = m.w1TxBytes / m.w1TxPkts;
     m.bytesPerPacketOut = b;
-    add('symmetry', Math.abs(a - b) <= 3 ? 'pass' : 'warn', Math.abs(a - b) <= 3 ? `both interfaces count the same framing (${a.toFixed(1)} / ${b.toFixed(1)} bytes per packet)` : `${ingress} counts ${a.toFixed(1)} bytes per packet, ${egress} ${b.toFixed(1)}: the two interfaces frame differently, so byte rates are not comparable across them (packet counts still are)`);
+    if (extraPkts === 0) add('symmetry', Math.abs(a - b) <= 3 ? 'pass' : 'warn', Math.abs(a - b) <= 3 ? `both interfaces count the same framing (${a.toFixed(1)} / ${b.toFixed(1)} bytes per packet)` : `${ingress} counts ${a.toFixed(1)} bytes per packet, ${egress} ${b.toFixed(1)}: the two interfaces frame differently, so byte rates are not comparable across them (packet counts still are)`);
+    else if (extraPkts > 0) {
+      const avg = extraBytes / extraPkts, ok = avg >= 42 && avg <= 1514;
+      add('symmetry', ok ? 'pass' : 'warn', ok ? `both interfaces count the same framing: ${ingress} saw ${extraPkts} more packets than ${egress} sent, averaging ${avg.toFixed(0)} bytes, a normal frame size (the plain averages ${a.toFixed(1)} / ${b.toFixed(1)} differ only because of them)` : `${ingress} saw ${extraPkts} more packets than ${egress} sent but they would average ${avg.toFixed(0)} bytes, which is no frame size: the two interfaces frame differently, so byte rates are not comparable across them (packet counts still are)`);
+    }
   }
   const fw = before.ip_forwarded >= 0 && after.ip_forwarded >= 0 ? delta32(after.ip_forwarded, before.ip_forwarded) : null;
   if (fw === null) add('lwip', 'warn', 'ip_forwarded is -1: the board was built without RT_LWIP_STATS');

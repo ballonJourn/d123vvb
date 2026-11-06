@@ -74,17 +74,35 @@ test('ramp: loss already at the first step means no sustainable rate (knee null)
 });
 
 test('ramp: the first report after a rate change is not counted (it still describes the old rate)', () => {
-  const r = new RampSearch({ startBps: 2 * M, stepBps: 1 * M, maxBps: 5 * M, stepMs: 1000, minReports: 1, settleReports: 1 });
+  const r = new RampSearch({ startBps: 2 * M, stepBps: 1 * M, maxBps: 5 * M, stepMs: 1000, minReports: 1, settleReports: 1, minExpected: 0, minLost: 0 });
   r.begin(0);
   r.onReport(rep(100, 100), 500);                                 // settling report, ignored even though it is all loss
   assert.equal(r.done, false);
   r.onReport(rep(100, 0), 1000); assert.equal(r.rate, 3 * M);
 });
 
-test('ramp: a step in which nothing arrived counts as total loss', () => {
+test('ramp: a step in which the receiver saw nothing is "no-data", not a loss measurement', () => {
   const r = new RampSearch({ startBps: 2 * M, stepBps: 1 * M, maxBps: 5 * M, stepMs: 500, minReports: 1, settleReports: 0 });
   r.begin(0); r.onReport(rep(0, 0), 500);
-  assert.equal(r.reason, 'loss'); assert.equal(r.results[0].loss, 1);
+  assert.equal(r.reason, 'no-data'); assert.equal(r.knee, null); assert.equal(r.results.length, 0);
+});
+
+test('ramp: a stray lost datagram or two is not an overloaded path (minLost)', () => {
+  const r = new RampSearch({ startBps: 1 * M, stepBps: 1 * M, maxBps: 5 * M, stepMs: 500, minReports: 1, settleReports: 0, minExpected: 0 });
+  r.begin(0);
+  r.onReport(rep(270, 3), 500);                                                  // 1.1 %, but only 3 lost
+  assert.equal(r.done, false); assert.equal(r.rate, 2 * M);
+  r.onReport(rep(270, 6), 1000);                                                 // 6 lost: a real loss
+  assert.equal(r.done, true); assert.equal(r.reason, 'loss'); assert.equal(r.knee, 1 * M);
+});
+
+test('ramp: a step is judged only after enough datagrams were accounted for (minExpected)', () => {
+  const r = new RampSearch({ startBps: 1 * M, stepBps: 1 * M, maxBps: 5 * M, stepMs: 500, minReports: 1, settleReports: 0, minExpected: 300 });
+  r.begin(0);
+  r.onReport(rep(100, 0), 600); r.onReport(rep(100, 0), 1100);
+  assert.equal(r.rate, 1 * M);                                                   // 200 so far: keep measuring this step
+  r.onReport(rep(100, 0), 1600);
+  assert.equal(r.rate, 2 * M);                                                   // 300: judged, next step
 });
 
 test('ramp: no feedback at all ends it with reason no-feedback', () => {

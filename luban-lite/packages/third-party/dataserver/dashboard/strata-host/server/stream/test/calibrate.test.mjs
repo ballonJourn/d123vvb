@@ -121,3 +121,21 @@ test('framing is never guessed from a mixed average', () => {
   const r = evaluate({ ...mixed, count: 1000, datagramBytes: 1032 });
   assert.equal(status(r, 'l2'), 'warn'); assert.match(text(r, 'l2'), /cannot be measured now/); assert.equal(r.measured.l2Measured, undefined);
 });
+
+test('real board, second run (route fixed): 1004 arrived for 1000 sent, 1070.0 vs 1074.0 bytes per packet is not a framing difference', () => {
+  const r = evaluate({
+    before: { uptime_ms: 1, ip_forwarded: 0, lwip: { stats: 1 }, ifs: [{ name: 'w03', ip: '192.168.169.1', up: 1, ...Z }, { name: 'e01', ip: '192.168.1.1', up: 1, ...Z }] },
+    after: { uptime_ms: 3500, ip_forwarded: 1000, lwip: { stats: 1 }, ifs: [{ name: 'w03', ip: '192.168.169.1', up: 1, ...Z, tx_pkts: 1000, tx_bytes: 1000 * 1074 },
+                                                                          { name: 'e01', ip: '192.168.1.1', up: 1, ...Z, rx_pkts: 1004, rx_bytes: 1004 * 1070 }] },
+    count: 1000, datagramBytes: 1032 });
+  assert.equal(r.verdict, 'pass', JSON.stringify(r.checks));
+  assert.match(text(r, 'symmetry'), /4 more packets than w03 sent, averaging 70 bytes/);
+});
+
+test('extra "packets" that average no frame size do show up as a framing difference', () => {
+  const r = evaluate({
+    before: { uptime_ms: 1, ip_forwarded: 0, ifs: [{ name: 'w03', ip: '1.1.1.1', up: 1, ...Z }, { name: 'e01', ip: '2.2.2.2', up: 1, ...Z }] },
+    after: { uptime_ms: 2, ip_forwarded: 1000, ifs: [{ name: 'w03', ip: '1.1.1.1', up: 1, ...Z, tx_pkts: 1000, tx_bytes: 1000 * 1074 }, { name: 'e01', ip: '2.2.2.2', up: 1, ...Z, rx_pkts: 1004, rx_bytes: 1004 * 1060 }] },
+    count: 1000, datagramBytes: 1032 });
+  assert.equal(status(r, 'symmetry'), 'warn');                                    // 1004*1060 - 1000*1074 = -9760 over 4 packets: impossible
+});

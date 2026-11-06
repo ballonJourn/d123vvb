@@ -102,6 +102,16 @@ Interface names: lwIP names an interface with two letters and an index, so on th
   is counted as reordered and does not enter it, so strong reordering makes jitter read lower.
 * **Round trip** is measured on PC1's clock alone (echoed send time minus the receiver's holding time); no
   clock sync is needed, one-way delay is not available.
+* **Sender restarts.** The receiver tells senders apart by stream id and source address:port, so a sender started
+  again (new process, sequence numbers back at 0) is counted afresh. A sender that returns from the same port, or
+  behind a relay that hides its port, is recognised by a run of 32 datagrams that are all too late or all duplicates
+  of what was already seen. (The first real ramp failed because the receiver was left running and took the new
+  sender for old datagrams; the rate search then read "nothing received" as 100 % loss.)
+* **"No data" is not "0 % loss".** An interval in which the receiver saw nothing has no loss figure (shown as "-"),
+  and a rate-limit step in which nothing arrived ends the search with `no-data`, not `loss`.
+* **Rate-limit search noise guards.** A step is judged only after 300 datagrams were accounted for and counts as loss
+  only if at least 5 were lost: at 1 Mbit/s three stray WiFi losses in 3 s are 1.1 %, not an overloaded path.
+* **Round trip** is smoothed with a quarter weight per report (the first sample often includes ARP resolution).
 * **Mbit/s** are application bits per second; the link carries about 5 % more.
 * **Windows timers.** The sender paces with Node timers; if the OS timer is coarse the fragments leave in
   small bursts instead of evenly.

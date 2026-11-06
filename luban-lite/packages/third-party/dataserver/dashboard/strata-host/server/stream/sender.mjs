@@ -141,10 +141,10 @@ export class StreamSender extends EventEmitter {
     const nowMs = performance.now();
     if (r.echoSendTs > 0) {
       const rtt = at - r.echoSendTs - r.echoDelayUs;
-      if (rtt >= 0) this.rttUs = this.rttUs === null ? rtt : this.rttUs + (rtt - this.rttUs) / 8;
+      if (rtt >= 0) this.rttUs = this.rttUs === null ? rtt : this.rttUs + (rtt - this.rttUs) / 4;   // the first sample often includes ARP resolution; a quarter weight forgets it in a few reports
     }
     this.reports++; this.lastReportAtMs = nowMs;
-    this.lastReport = { ...r, lossFraction: r.expected > 0 ? r.lost / r.expected : 0, at: nowMs };
+    this.lastReport = { ...r, lossFraction: r.expected > 0 ? r.lost / r.expected : null, at: nowMs };   // null: the receiver saw nothing in that interval
     this.emit('report', this.lastReport);
     if (this.adapt) { const before = this.bitrate; this.setBitrate(this.adapt.onReport(r)); if (this.bitrate !== before) this.emit('adapt', { bitrate: this.bitrate, why: this.adapt.last }); }
     if (this.ramp) this.stepRamp(this.ramp.onReport(r, nowMs));

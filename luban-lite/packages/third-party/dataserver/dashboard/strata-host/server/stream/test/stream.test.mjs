@@ -159,3 +159,23 @@ test('adaptive with the application\'s own frames: the sender announces each new
   assert.ok(r.tx.bitrate < 6e6);
   r.stop();
 });
+
+test('a receiver left running: a second sender (new process) is measured from its first datagram, and a rate-limit search on it works', async () => {
+  const rx = new StreamReceiver({ port: 0, host: '127.0.0.1', reportMs: 100 }); await rx.start();
+  const path = await createPath({ receiver: { port: rx.port }, d133: { rateBps: 6e6 }, seed: 8 });
+  const live = [];
+  try {
+    const first = new StreamSender({ host: '127.0.0.1', port: path.port, bitrate: 2e6, fps: 30 }); live.push(first); await first.start();
+    await sleep(1500); first.stop(); await sleep(300);                           // run one: seq 0..~280, then it ends and the receiver stays up
+    assert.ok(rx.stats().framesOk >= 30, `frames after the first run ${rx.stats()?.framesOk}`);
+
+    const second = new StreamSender({ host: '127.0.0.1', port: path.port, fps: 30,
+      ramp: { startBps: 2e6, stepBps: 1e6, maxBps: 9e6, stepMs: 700, minReports: 3, settleReports: 1 } }); live.push(second); await second.start();
+    const done = new Promise(res => second.on('ramp-done', res));
+    const out = await Promise.race([done, sleep(20_000).then(() => null)]);
+    assert.ok(out, 'the ramp did not finish');
+    assert.notEqual(out.reason, 'no-data', 'the receiver treated the new sender as old datagrams');
+    assert.equal(out.reason, 'loss'); assert.ok(out.knee >= 4e6 && out.knee <= 5e6, `knee ${out.knee}`);
+    assert.ok(second.lastReport.expected > 0);
+  } finally { for (const t of live) t.stop(); rx.stop(); path.close(); }               // always, or a failure keeps the test process alive
+});

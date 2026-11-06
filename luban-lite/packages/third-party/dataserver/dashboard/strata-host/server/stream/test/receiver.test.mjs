@@ -150,3 +150,76 @@ test('only the newest datagram sets the echo (a reordered old one must not infla
   r.handlePacket(pkt({ seq: 0, captureTs: 1_000_000 }), RINFO, 2_200_000);     // older, arrives later
   assert.equal(r.tick(2_300_000)[0].echoSendTs, 2_000_000);
 });
+
+// ---- a sender that starts over (the case from the first real ramp: the receiver was left running) ----
+const FROM = port => ({ address: '10.0.0.1', port });
+const feedFrom = (r, rinfo, list, at = 0) => list.forEach(o => r.handlePacket(pkt(o), rinfo, at));
+
+test('a sender started again (new process, new port, sequence back at 0) gets fresh counters, not "ancient datagrams"', () => {
+  const r = rx();
+  feedFrom(r, FROM(4000), frames(200, 1));                                      // the first run: seq 0..199
+  feedFrom(r, FROM(4001), frames(50, 1));                                       // the second run: seq 0..49 again
+  const s = r.stats();                                                          // the screens show the sender heard from last
+  assert.equal(s.unique, 50); assert.equal(s.lost, 0); assert.equal(s.tooLate, 0); assert.equal(s.framesOk, 50);
+  assert.equal(r.streams.size, 2);
+  assert.equal(r.tick(1000).find(x => x.expected === 50)?.lost, 0);
+});
+
+test('a sender that starts over from the SAME port is recognised after a run of far-behind datagrams', () => {
+  const r = rx({ window: 64 });
+  feedFrom(r, FROM(4000), frames(1000, 1));                                      // highest seq 999
+  feedFrom(r, FROM(4000), frames(100, 1));                                       // starts over at 0
+  const s = r.stats();
+  assert.equal(s.lost, 0); assert.equal(s.tooLate, 0);                           // the new run is counted from where it was recognised
+  assert.ok(s.unique >= 60 && s.unique <= 70, `unique ${s.unique}`);
+  assert.equal(s.framesOk, s.unique);
+});
+
+test('one stray old datagram is not a restart', () => {
+  const r = rx({ window: 64 });
+  feedFrom(r, FROM(4000), frames(500, 1));
+  r.handlePacket(pkt({ seq: 3 }), FROM(4000), 0);                                // far behind, but alone
+  feedFrom(r, FROM(4000), frames(10, 1, 500, 500));
+  const s = r.stats();
+  assert.equal(s.tooLate, 1); assert.equal(s.expected, 510);
+});
+
+test('a silent stream stops being reported to, and its numbers stay', () => {
+  const r = rx({ idleMs: 5000 });
+  feedFrom(r, FROM(4000), frames(10, 1), 1_000_000);
+  assert.equal(r.tick(1_100_000).length, 1);
+  assert.equal(r.tick(7_000_000).length, 0);                                     // 6 s of silence
+  assert.equal(r.stats().unique, 10);
+});
+
+test('an interval in which nothing arrived is "no data", not 0 % loss', () => {
+  const r = rx({ idleMs: 60_000 });
+  feedFrom(r, FROM(4000), frames(5, 1), 0);
+  assert.equal(r.tick(500_000)[0].expected, 5);
+  r.tick(1_000_000);                                                             // nothing new
+  assert.equal(r.stats().lastReport.expected, 0); assert.equal(r.stats().lastReport.lossFraction, null);
+  assert.equal(new StreamReceiver({ clock: () => 0 }).stats(), null);
+});
+
+test('two senders at the same time are counted apart', () => {
+  const r = rx();
+  feedFrom(r, FROM(4000), frames(30, 1)); feedFrom(r, FROM(4001), frames(10, 1, 0, 100));
+  assert.equal(r.streams.size, 2);
+  assert.deepEqual(r.tick(1).map(x => x.expected).sort((a, b) => a - b), [10, 30]);
+});
+
+test('a restart inside the window looks like duplicates: a run of them starts the sender over', () => {
+  const r = rx();                                                                // window 4096, the first run is shorter than that
+  feedFrom(r, FROM(4000), frames(300, 1));
+  feedFrom(r, FROM(4000), frames(100, 1));                                       // seq 0..99 again: every one is a duplicate of the first run
+  const s = r.stats();
+  assert.equal(s.lost, 0); assert.equal(s.duplicates, 0);
+  assert.ok(s.unique >= 60 && s.unique <= 70, `unique ${s.unique}`);             // counted from where the restart was recognised
+  assert.equal(s.framesOk, s.unique);
+});
+
+test('a few real duplicates are still duplicates, not a restart', () => {
+  const r = rx(); const f = frames(100, 1);
+  feedFrom(r, FROM(4000), f); feedFrom(r, FROM(4000), f.slice(10, 20));          // 10 repeated datagrams
+  assert.equal(r.stats().duplicates, 10); assert.equal(r.stats().unique, 100);
+});

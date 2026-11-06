@@ -30,7 +30,7 @@ export interface Config { host: string; dataPort: number; statPort: number; outD
 
 export interface StreamReport {
   expected: number; received: number; lost: number; reordered: number; duplicates: number; jitterUs: number;
-  framesOk: number; framesDropped: number; queueDropped: number; recvPackets: number; recvBytes: number; intervalMs: number; lossFraction: number;
+  framesOk: number; framesDropped: number; queueDropped: number; recvPackets: number; recvBytes: number; intervalMs: number; lossFraction: number | null;
 }
 export interface RampResult { bps: number; loss: number; expected: number; lost: number }
 export interface StreamStats {
@@ -42,7 +42,7 @@ export interface StreamStats {
   adapt?: { last: string; hold: number } | null;
   ramp?: { done: boolean; knee: number | null; reason: string | null; results: RampResult[]; rate: number } | null;
   // receiver
-  listening?: number; packets?: number; bytes?: number; unique?: number; expected?: number; lost?: number; lossFraction?: number; reordered?: number;
+  listening?: number; packets?: number; bytes?: number; unique?: number; expected?: number; lost?: number; lossFraction?: number | null; reordered?: number;
   duplicates?: number; tooLate?: number; lateFragments?: number; framesOk?: number; framesDropped?: number; openFrames?: number; jitterUs?: number;
   frameBytes?: number; malformed?: number;
 }

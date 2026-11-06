@@ -9,6 +9,12 @@
  *  - Completed frames wait in a bounded queue for the application; when it is full the OLDEST
  *    frame is discarded (queueDropped), so a slow consumer costs old data, never delay.
  *  - Every reportMs it sends a REPORT back to the sender: what arrived, what was lost, jitter.
+ *  - A sender is told apart by stream id AND source address:port, so a sender that is started again
+ *    (new process, sequence numbers back at 0) gets fresh counters instead of being mistaken for
+ *    a flood of ancient datagrams. A sender that comes back from the same port is recognised by a run
+ *    of RESTART_AFTER datagrams that are all behind the highest sequence seen (too late, or duplicates of
+ *    what was already received). A stream that has
+ *    been silent for idleMs is no longer reported to (nobody is listening) but its numbers stay.
  *
  * Jitter is RFC 3550 interarrival jitter on the network transit time of each new-highest datagram,
  * transit = arrival time (receiver clock) - send time (sender clock). The two clocks differ by a
@@ -20,6 +26,8 @@ import * as P from './protocol.mjs';
 import { BoundedQueue } from './queue.mjs';
 
 const sdelta = (a, b) => (a - b) | 0;        // a - b on a wrapping u32 axis, signed
+const RESTART_AFTER = 32;                    // consecutive far-behind datagrams that mean "the sender started over"
+const MAX_STREAMS = 16;
 
 class StreamState {
   constructor(streamId, o) {
@@ -30,16 +38,16 @@ class StreamState {
       framesOk: 0, framesDropped: 0, queueDropped: 0,
       hasFrame: false, newest: 0, open: new Map(), out: new BoundedQueue(o.frameQueue),
       jitter: 0, prevTransit: null, lastArrival: 0, lastSendTs: 0, reportSeq: 0, lastReport: null,
-      prev: null,
+      prev: null, lastSeen: 0, lateRun: 0, key: null,
     });
   }
 }
 
 export class StreamReceiver extends EventEmitter {
   constructor({ port = 5600, host = '0.0.0.0', reportMs = 500, frameQueue = 8, maxOpenFrames = 8, frameTimeoutMs = 200,
-                tolerateFrames = 0, window = 4096, clock = P.nowUs, onFrame = null } = {}) {
+                tolerateFrames = 0, window = 4096, idleMs = 5000, clock = P.nowUs, onFrame = null } = {}) {
     super();
-    Object.assign(this, { port, host, reportMs, frameQueue, maxOpenFrames, frameTimeoutMs, tolerateFrames, window, clock, onFrame });
+    Object.assign(this, { port, host, reportMs, frameQueue, maxOpenFrames, frameTimeoutMs, tolerateFrames, window, idleMs, clock, onFrame });
     this.streams = new Map();
     this.malformed = 0;
     this.socket = null; this.timer = null; this.drainScheduled = false;
@@ -68,11 +76,26 @@ export class StreamReceiver extends EventEmitter {
     if (s) try { s.close(); } catch { /* already closed */ }
   }
 
+  /** The state of one sender: stream id plus its source address and port. */
   state(streamId, rinfo) {
-    let st = this.streams.get(streamId);
-    if (!st) { st = new StreamState(streamId, this); this.streams.set(streamId, st); }
+    const key = `${streamId}@${rinfo?.address ?? '-'}:${rinfo?.port ?? 0}`;
+    let st = this.streams.get(key);
+    if (!st) {
+      st = new StreamState(streamId, this); st.key = key; this.streams.set(key, st);
+      if (this.streams.size > MAX_STREAMS) {                       // keep the memory bounded: forget the longest silent one
+        const stale = [...this.streams.values()].filter(x => x !== st).sort((a, b) => a.lastSeen - b.lastSeen)[0];
+        if (stale) this.streams.delete(stale.key);
+      }
+    }
     if (rinfo) st.peer = { address: rinfo.address, port: rinfo.port };
     return st;
+  }
+
+  /** The stream that was heard from last (what the screens show), or the one with this id. */
+  latest(streamId) {
+    let best = null;
+    for (const st of this.streams.values()) if ((streamId === undefined || st.streamId === streamId) && (!best || st.lastSeen >= best.lastSeen)) best = st;
+    return best;
   }
 
   /** Classifies a sequence number against the window: 'new' | 'reordered' | 'duplicate' | 'toolate'. */
@@ -93,9 +116,15 @@ export class StreamReceiver extends EventEmitter {
     const d = P.decode(buf);
     if (!d) { this.malformed++; return; }
     if (d.type !== 'data') return;
-    const st = this.state(d.streamId, rinfo);
-    st.packets++; st.bytes += buf.length;
+    let st = this.state(d.streamId, rinfo);
+    st.packets++; st.bytes += buf.length; st.lastSeen = at;
     const cls = this.track(st, d.seq);
+    if (cls === 'toolate' || cls === 'duplicate') {
+      // The same sender started over from the same port (or behind something that hides its port): its
+      // sequence numbers are behind the highest seen and stay so. Far behind they are "too late", within
+      // the window they look like duplicates of datagrams already seen. Either way a run of them is a restart.
+      if (++st.lateRun >= RESTART_AFTER) { this.streams.delete(st.key); this.handlePacket(buf, rinfo, at); return; }
+    } else st.lateRun = 0;
     if (cls === 'new') {
       const sendTs = d.captureTs + d.sendDelayUs, transit = at - sendTs;
       if (st.prevTransit !== null) st.jitter += (Math.abs(transit - st.prevTransit) - st.jitter) / 16;
@@ -150,7 +179,8 @@ export class StreamReceiver extends EventEmitter {
 
   /** Oldest completed frame, or null. */
   takeFrame(streamId) {
-    for (const st of streamId === undefined ? this.streams.values() : [this.streams.get(streamId)].filter(Boolean)) {
+    for (const st of this.streams.values()) {
+      if (streamId !== undefined && st.streamId !== streamId) continue;
       const f = st.out.shift();
       if (f) return f;
     }
@@ -169,6 +199,8 @@ export class StreamReceiver extends EventEmitter {
     const out = [];
     for (const st of this.streams.values()) {
       if (!st.started) continue;
+      const silent = at - st.lastSeen > this.idleMs * 1000;       // nobody is sending: no report, no interval to describe
+      if (silent && st.prev && st.prev.maxExt === st.maxExt) continue;
       const p = st.prev ?? { t: at, maxExt: st.base - 1, unique: 0, packets: 0, bytes: 0, reordered: 0, duplicates: 0, framesOk: 0, framesDropped: 0, queueDropped: 0 };
       const expected = st.maxExt - p.maxExt, received = st.unique - p.unique;
       const r = {
@@ -181,7 +213,7 @@ export class StreamReceiver extends EventEmitter {
       };
       st.prev = { t: at, maxExt: st.maxExt, unique: st.unique, packets: st.packets, bytes: st.bytes, reordered: st.reordered,
                   duplicates: st.duplicates, framesOk: st.framesOk, framesDropped: st.framesDropped, queueDropped: st.queueDropped };
-      st.lastReport = { ...r, lossFraction: r.expected > 0 ? r.lost / r.expected : 0, at };
+      st.lastReport = { ...r, lossFraction: r.expected > 0 ? r.lost / r.expected : null, at };   // null: nothing arrived, which is not "0 % loss"
       if (st.peer && this.socket) this.socket.send(P.encodeReport(r), st.peer.port, st.peer.address, () => {});
       this.emit('report', st.lastReport);
       out.push(r);
@@ -191,12 +223,12 @@ export class StreamReceiver extends EventEmitter {
 
   /** Cumulative numbers of one stream (the first one when no id is given). */
   stats(streamId) {
-    const st = streamId === undefined ? this.streams.values().next().value : this.streams.get(streamId);
+    const st = this.latest(streamId);
     if (!st) return null;
     const expected = st.started ? st.maxExt - st.base + 1 : 0;
     return {
       streamId: st.streamId, peer: st.peer, packets: st.packets, bytes: st.bytes, unique: st.unique, expected,
-      lost: Math.max(0, expected - st.unique), lossFraction: expected > 0 ? Math.max(0, expected - st.unique) / expected : 0,
+      lost: Math.max(0, expected - st.unique), lossFraction: expected > 0 ? Math.max(0, expected - st.unique) / expected : null,
       reordered: st.reordered, duplicates: st.duplicates, tooLate: st.tooLate, lateFragments: st.lateFragments,
       framesOk: st.framesOk, framesDropped: st.framesDropped, queueDropped: st.queueDropped, queued: st.out.length,
       openFrames: st.open.size, jitterUs: Math.round(st.jitter), malformed: this.malformed, lastReport: st.lastReport,

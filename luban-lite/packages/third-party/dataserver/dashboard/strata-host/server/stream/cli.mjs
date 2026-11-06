@@ -75,7 +75,7 @@ export async function main(argv) {
       const wire = prev ? P.wireBytes(s.bytes - prev.bytes, s.packets - prev.packets) / dt : null, rep = s.lastReport;
       out({ t: Math.round((now - t0) / 1000), role: 'recv', mbit: mbit(wire), loss: rep?.lossFraction ?? null, lost: s.lost, expected: s.expected, reordered: s.reordered, duplicates: s.duplicates,
             jitterMs: s.jitterUs / 1000, framesOk: s.framesOk, framesDropped: s.framesDropped, queueDropped: s.queueDropped,
-            line: `t=${String(Math.round((now - t0) / 1000)).padStart(3)}s  recv ${fmt(mbit(wire))} Mbit/s  loss ${fmt((rep?.lossFraction ?? 0) * 100, 1)} % (${s.lost}/${s.expected})  reordered ${s.reordered}  jitter ${fmt(s.jitterUs / 1000)} ms  frames ${s.framesOk} ok / ${s.framesDropped} dropped  queue drops ${s.queueDropped}` });
+            line: `t=${String(Math.round((now - t0) / 1000)).padStart(3)}s  recv ${fmt(mbit(wire))} Mbit/s  loss ${rep?.lossFraction == null ? '-' : fmt(rep.lossFraction * 100, 1)} % (${s.lost}/${s.expected})  reordered ${s.reordered}  jitter ${fmt(s.jitterUs / 1000)} ms  frames ${s.framesOk} ok / ${s.framesDropped} dropped  queue drops ${s.queueDropped}` });
       prev = { t: now, bytes: s.bytes, packets: s.packets };
     }, 1000);
     await done; clearInterval(timer); rx.stop(); return 0;
@@ -95,7 +95,8 @@ export async function main(argv) {
     tx.on('adapt', e => { if (!json) console.log(`  rate -> ${fmt(e.bitrate / 1e6)} Mbit/s (${e.why})`); });
     tx.on('ramp-done', e => {
       if (json) console.log(JSON.stringify({ event: 'ramp-done', ...e }));
-      else console.log(e.knee === null ? `ramp finished (${e.reason}): no sustainable rate found` : `ramp finished (${e.reason}): loss begins above ${fmt(e.knee / 1e6)} Mbit/s (application bitrate)`);
+      else console.log(e.reason === 'no-data' ? 'ramp stopped (no-data): the receiver saw no datagrams during a step. Is `recv` running on the other PC and reachable (firewall, route)? This is not a loss measurement.'
+        : e.knee === null ? `ramp finished (${e.reason}): no sustainable rate found` : `ramp finished (${e.reason}): loss begins above ${fmt(e.knee / 1e6)} Mbit/s (application bitrate)`);
       stop();
     });
     await tx.start();
@@ -105,7 +106,7 @@ export async function main(argv) {
       const s = tx.stats(), h = tx.history, r = s.lastReport, now = Date.now();
       out({ t: Math.round((now - t0) / 1000), role: 'send', mbit: mbit(h.txWire.at(-1) ?? null), targetMbit: s.targetBps / 1e6, loss: r?.lossFraction ?? null, jitterMs: r ? r.jitterUs / 1000 : null,
             rttMs: s.rttMs, queueDropped: s.queueDropped, sendErrors: s.sendErrors,
-            line: `t=${String(Math.round((now - t0) / 1000)).padStart(3)}s  sent ${fmt(mbit(h.txWire.at(-1) ?? null))} Mbit/s  target ${fmt(s.targetBps / 1e6)}  loss ${r ? fmt(r.lossFraction * 100, 1) : '-'} %  jitter ${r ? fmt(r.jitterUs / 1000) : '-'} ms  rtt ${fmt(s.rttMs)} ms  queue drops ${s.queueDropped}${s.reports ? '' : '  (no report from the receiver yet)'}` });
+            line: `t=${String(Math.round((now - t0) / 1000)).padStart(3)}s  sent ${fmt(mbit(h.txWire.at(-1) ?? null))} Mbit/s  target ${fmt(s.targetBps / 1e6)}  loss ${r?.lossFraction == null ? '-' : fmt(r.lossFraction * 100, 1)} %  jitter ${r ? fmt(r.jitterUs / 1000) : '-'} ms  rtt ${fmt(s.rttMs)} ms  queue drops ${s.queueDropped}${s.reports ? '' : '  (no report from the receiver yet)'}` });
     }, 1000);
     await done; clearInterval(timer); tx.stop(); return 0;
   }
