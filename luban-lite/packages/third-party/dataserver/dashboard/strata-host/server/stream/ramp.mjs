@@ -43,6 +43,11 @@ export class RampSearch {
     this.rate += this.stepBps; this.stepStart = nowMs; this.reports = []; this.skipped = 0;
     return this.rate;
   }
+  /** The sender's own process was paused: what was collected for this step is distorted, so measure it again. */
+  invalidate(nowMs) {
+    if (this.done) return;
+    this.reports = []; this.skipped = 0; this.stepStart = nowMs; this.lastReportAt = nowMs;
+  }
   /** No report for noFeedbackMs: the receiver is not answering, the ramp cannot measure anything. */
   onSilence(nowMs) {
     if (!this.done && nowMs - this.lastReportAt >= this.noFeedbackMs) this.finish('no-feedback', null);

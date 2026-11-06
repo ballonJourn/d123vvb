@@ -179,3 +179,35 @@ test('a receiver left running: a second sender (new process) is measured from it
     assert.ok(second.lastReport.expected > 0);
   } finally { for (const t of live) t.stop(); rx.stop(); path.close(); }               // always, or a failure keeps the test process alive
 });
+
+test('a pause of the sender process is announced, and the reports around it do not feed the round trip, adaptation or the ramp', async () => {
+  const rx = new StreamReceiver({ port: 0, host: '127.0.0.1', reportMs: 100 }); await rx.start();
+  const path = await createPath({ receiver: { port: rx.port } });
+  const tx = new StreamSender({ host: '127.0.0.1', port: path.port, fps: 30,
+    ramp: { startBps: 1e6, stepBps: 1e6, maxBps: 4e6, stepMs: 600, minReports: 2, settleReports: 1 } });
+  const stalls = []; tx.on('stall', e => stalls.push(e.ms));
+  try {
+    await tx.start();
+    await sleep(900);
+    const rttBefore = tx.stats().rttMs;
+    assert.ok(rttBefore !== null && rttBefore < 50, `rtt before ${rttBefore}`);
+    const end = Date.now() + 800; while (Date.now() < end) { /* the whole process is paused, like a click in the console window */ }
+    await sleep(400);
+    assert.equal(stalls.length, 1); assert.ok(stalls[0] >= 700, `stall ${stalls[0]} ms`);
+    assert.equal(tx.stats().stalls, 1);
+    assert.ok(tx.stats().rttMs < 100, `round trip after the pause ${tx.stats().rttMs} ms (the pause must not be counted into it)`);
+    assert.equal(tx.ramp.done, false);
+  } finally { tx.stop(); rx.stop(); path.close(); }
+});
+
+test('a pause of the sender is not "no reports": an adaptive sender does not back off because of it', async () => {
+  const rx = new StreamReceiver({ port: 0, host: '127.0.0.1', reportMs: 100 }); await rx.start();
+  const path = await createPath({ receiver: { port: rx.port } });
+  const tx = new StreamSender({ host: '127.0.0.1', port: path.port, fps: 30, bitrate: 2e6, minBitrate: 5e5, maxBitrate: 2e6, adaptive: true, staleMs: 400 });
+  try {
+    await tx.start(); await sleep(800);
+    const end = Date.now() + 1200; while (Date.now() < end) { /* paused: longer than staleMs */ }
+    await sleep(500);
+    assert.notEqual(tx.adapt.last, 'stale'); assert.ok(tx.bitrate >= 1.9e6, `rate ${tx.bitrate}`);
+  } finally { tx.stop(); rx.stop(); path.close(); }
+});

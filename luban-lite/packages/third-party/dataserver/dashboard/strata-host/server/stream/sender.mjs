@@ -8,6 +8,11 @@
  *    (queueDropped). Nothing is ever retransmitted.
  *  - The fragments of a frame are spread over `pacing` x one frame interval instead of leaving in
  *    one burst, because a burst is what overflows the D133's forwarding queue.
+ *  - A monitor notices when THIS process was paused (a click inside the Windows console, power saving,
+ *    antivirus): the sender sent nothing meanwhile and the reports that piled up are handled late, which would
+ *    show up as a huge round trip time, as "no reports" and as a distorted rate-limit step. While the process was
+ *    recently late those reports do not feed the round trip, adaptation or the ramp, the ramp step is measured
+ *    again, and a 'stall' event says how long the pause was.
  *  - The receiver's REPORTs feed (a) the round trip time, measured on this machine's clock alone
  *    from the echoed send time, (b) optionally AdaptiveRate (lower the rate on loss, raise it on
  *    clean reports, back off when the reports stop) or (c) RampSearch (raise it step by step to
@@ -46,7 +51,8 @@ export class StreamSender extends EventEmitter {
     this.lastReport = null; this.lastReportAtMs = null; this.reports = 0; this.rttUs = null; this.rampDoneEmitted = false;
     this.history = { t: [], txWire: [], rxWire: [], txPps: [], rxPps: [], loss: [], jitterMs: [], rttMs: [], target: [] };
     this.prevSample = null; this.running = false;
-    this.socket = null; this.timers = { produce: null, send: null, watch: null, sample: null };
+    this.lag = { last: 0, until: 0, resumeAt: 0, stalls: 0, maxMs: 0 };
+    this.socket = null; this.timers = { produce: null, send: null, watch: null, sample: null, lag: null };
     this.interval = { emaUs: 1e6 / fps };
   }
 
@@ -63,6 +69,8 @@ export class StreamSender extends EventEmitter {
         this.running = true; this.startedAtMs = performance.now();
         this.prevSample = { t: this.startedAtMs, ...this.counters() };
         this.ramp?.begin(this.startedAtMs);
+        this.lag.last = performance.now();
+        this.timers.lag = setInterval(() => this.checkLag(), 100);
         this.timers.watch = setInterval(() => this.watch(), 250);
         this.timers.sample = setInterval(() => this.sample(), 1000);
         if (this.opts.source === 'synthetic') this.produce(this.startedAtMs);
@@ -139,13 +147,14 @@ export class StreamSender extends EventEmitter {
     const r = P.decode(buf);
     if (!r || r.type !== 'report' || r.streamId !== this.opts.streamId) return;
     const nowMs = performance.now();
-    if (r.echoSendTs > 0) {
+    if (r.echoSendTs > 0 && nowMs >= this.lag.until) {
       const rtt = at - r.echoSendTs - r.echoDelayUs;
       if (rtt >= 0) this.rttUs = this.rttUs === null ? rtt : this.rttUs + (rtt - this.rttUs) / 4;   // the first sample often includes ARP resolution; a quarter weight forgets it in a few reports
     }
     this.reports++; this.lastReportAtMs = nowMs;
     this.lastReport = { ...r, lossFraction: r.expected > 0 ? r.lost / r.expected : null, at: nowMs };   // null: the receiver saw nothing in that interval
     this.emit('report', this.lastReport);
+    if (nowMs < this.lag.until) return;                    // this process was just late: what the report describes is distorted
     if (this.adapt) { const before = this.bitrate; this.setBitrate(this.adapt.onReport(r)); if (this.bitrate !== before) this.emit('adapt', { bitrate: this.bitrate, why: this.adapt.last }); }
     if (this.ramp) this.stepRamp(this.ramp.onReport(r, nowMs));
   }
@@ -158,9 +167,22 @@ export class StreamSender extends EventEmitter {
     }
   }
 
+  /** Every 100 ms: how late was this timer? A big lag means the whole process was paused, not the network. */
+  checkLag() {
+    const now = performance.now(), late = now - this.lag.last - 100;
+    this.lag.last = now;
+    this.lag.maxMs = Math.max(this.lag.maxMs * 0.9, late);
+    if (late > 50) this.lag.until = now + 1000;           // reports handled around now describe the pause, not the path
+    if (late > 500) {
+      this.lag.stalls++; this.lag.resumeAt = now;
+      this.ramp?.invalidate(now);                         // measure the step again
+      this.emit('stall', { ms: Math.round(late) });
+    }
+  }
+
   /** Called every 250 ms: no reports means the receiver or the path is gone. */
   watch() {
-    const now = performance.now(), age = now - (this.lastReportAtMs ?? this.startedAtMs);
+    const now = performance.now(), age = now - Math.max(this.lastReportAtMs ?? this.startedAtMs, this.lag.resumeAt);   // a pause of this process is not silence
     if (this.adapt) { const before = this.bitrate; this.setBitrate(this.adapt.onSilence(age, now)); if (this.bitrate !== before) this.emit('adapt', { bitrate: this.bitrate, why: this.adapt.last }); }
     if (this.ramp) { this.ramp.onSilence(now); this.stepRamp(this.ramp.rate); }
   }
@@ -189,7 +211,7 @@ export class StreamSender extends EventEmitter {
       role: 'send', running: this.running, target: `${this.opts.host}:${this.opts.port}`, streamId: this.opts.streamId,
       targetBps: this.bitrate, minBps: this.minBitrate, maxBps: this.maxBitrate, fps: this.opts.fps,
       ...this.c, queued: this.queue.length, queueDropped: this.queue.dropped,
-      rttMs: this.rttUs === null ? null : this.rttUs / 1000, reports: this.reports,
+      rttMs: this.rttUs === null ? null : this.rttUs / 1000, reports: this.reports, stalls: this.lag.stalls,
       reportAgeMs: this.lastReportAtMs === null ? null : Math.round(now - this.lastReportAtMs),
       lastReport: r ? { ...r } : null,
       adapt: this.adapt ? { last: this.adapt.last, hold: this.adapt.hold } : null,

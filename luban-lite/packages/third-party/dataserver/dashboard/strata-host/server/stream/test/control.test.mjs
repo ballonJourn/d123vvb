@@ -174,3 +174,14 @@ test('interfaces: a down interface or one without an address is not chosen while
   assert.deepEqual(pickInterfaces([NIC('lo', '127.0.0.1')]), { ingress: null, egress: null, ambiguous: [] });
   assert.deepEqual(pickInterfaces(undefined), { ingress: null, egress: null, ambiguous: [] });
 });
+
+test('ramp: invalidate() throws away what the step collected, so a pause of the sender cannot decide it', () => {
+  const r = new RampSearch({ startBps: 2 * M, stepBps: 1 * M, maxBps: 5 * M, stepMs: 1000, minReports: 2, settleReports: 1, minExpected: 0, minLost: 0 });
+  r.begin(0);
+  r.onReport(rep(100, 100), 500); r.onReport(rep(100, 100), 1000);              // would be total loss
+  r.invalidate(1100);
+  assert.equal(r.done, false); assert.equal(r.reports.length, 0);
+  r.onReport(rep(100, 0), 1600);                                                 // settling report after the pause
+  r.onReport(rep(100, 0), 2200); r.onReport(rep(100, 0), 2700);
+  assert.equal(r.done, false); assert.equal(r.rate, 3 * M);                      // judged on the clean reports only
+});

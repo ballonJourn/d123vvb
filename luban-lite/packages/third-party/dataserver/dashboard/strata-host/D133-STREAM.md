@@ -111,6 +111,12 @@ Interface names: lwIP names an interface with two letters and an index, so on th
   and a rate-limit step in which nothing arrived ends the search with `no-data`, not `loss`.
 * **Rate-limit search noise guards.** A step is judged only after 300 datagrams were accounted for and counts as loss
   only if at least 5 were lost: at 1 Mbit/s three stray WiFi losses in 3 s are 1.1 %, not an overloaded path.
+* **Pauses of the sender's own process.** The first real rate-limit run showed two 3 s gaps in the output with the
+  sent rate near zero and the round trip jumping to ~1 s: the Node process itself had been paused (on Windows
+  typically a click inside the console window; also power saving or antivirus), the reports piled up and were
+  handled late. A 100 ms timer now measures how late it runs; a lag above 500 ms emits `stall`, the reports handled
+  within a second of any lag above 50 ms are left out of the round trip, adaptation and the ramp, a ramp step is
+  measured again, and a pause is not counted as "no reports".
 * **Round trip** is smoothed with a quarter weight per report (the first sample often includes ARP resolution).
 * **Mbit/s** are application bits per second; the link carries about 5 % more.
 * **Windows timers.** The sender paces with Node timers; if the OS timer is coarse the fragments leave in

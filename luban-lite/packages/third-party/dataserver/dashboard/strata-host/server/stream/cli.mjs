@@ -92,6 +92,7 @@ export async function main(argv) {
       pacing: Number(f.pacing ?? 0.5), mtuPayload: Number(f.mtu ?? P.MAX_PAYLOAD), adaptive: mode === 'adaptive',
       ramp: mode === 'ramp' ? { startBps: parseRate(f['ramp-start'] ?? '1M'), stepBps: parseRate(f['ramp-step'] ?? '1M'), maxBps: max ?? parseRate('30M'), stepMs: Number(f['ramp-ms'] ?? 3000), lossThreshold: Number(f['loss-threshold'] ?? 0.01) } : null });
     tx.on('socket-error', e => console.error(e.message));
+    tx.on('stall', e => { if (!json) console.log(`  ! this PC paused the sender for ${(e.ms / 1000).toFixed(1)} s (not the network; the step is measured again). A click inside this console window does that: press Esc. Power saving and antivirus can too.`); });
     tx.on('adapt', e => { if (!json) console.log(`  rate -> ${fmt(e.bitrate / 1e6)} Mbit/s (${e.why})`); });
     tx.on('ramp-done', e => {
       if (json) console.log(JSON.stringify({ event: 'ramp-done', ...e }));
