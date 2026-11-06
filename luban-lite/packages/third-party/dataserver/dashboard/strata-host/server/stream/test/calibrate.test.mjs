@@ -40,7 +40,7 @@ test('a forwarding queue that refuses frames: arrived still counts them, refused
 
 test('the WiFi driver refusing frames: packets accepted at e0 never leave w1', async () => {
   const r = await rig({ d133: { w1Loss: 0.15 }, seed: 6 }); const out = await r.run(); r.close();
-  assert.equal(status(out, 'forwarded'), 'warn'); assert.match(text(out, 'forwarded'), /never left w1.*refused by the driver/);
+  assert.equal(status(out, 'forwarded'), 'warn'); assert.match(text(out, 'forwarded'), /never left w03.*refused by the driver/);
   assert.equal(status(out, 'refused'), 'warn');
 });
 
@@ -59,7 +59,7 @@ test('evaluate: counted at e0 but nothing left w1 is a failure that points at fo
 
 test('evaluate: a missing interface is reported with the names the board does list', () => {
   const r = evaluate({ before: { ifs: [{ name: 'lo' }] }, after: { ifs: [{ name: 'lo' }] }, count: 1, datagramBytes: 1 });
-  assert.equal(r.verdict, 'fail'); assert.match(r.checks[0].text, /interfaces seen: lo/);
+  assert.equal(r.verdict, 'fail'); assert.match(r.checks[0].text, /the board lists: lo/); assert.match(r.checks[0].text, /--ingress/);
 });
 
 test('evaluate: 32-bit counter wrap during the run does not matter', () => {
@@ -75,4 +75,16 @@ test('evaluate: lwIP forwarded count is checked when the board has RT_LWIP_STATS
   assert.equal(status(evaluate({ before: S(1, Z, Z, { ip_forwarded: 10 }), after: S(2, e0, w1, { ip_forwarded: 110 }), count: 100, datagramBytes: 1032 }), 'lwip'), 'pass');
   assert.equal(status(evaluate({ before: S(1, Z, Z, { ip_forwarded: 10 }), after: S(2, e0, w1, { ip_forwarded: 60 }), count: 100, datagramBytes: 1032 }), 'lwip'), 'warn');
   assert.match(text(evaluate({ before: S(1, Z, Z), after: S(2, e0, w1), count: 100, datagramBytes: 1032 }), 'lwip'), /without RT_LWIP_STATS/);
+});
+
+test('the interface names are found by themselves: this board calls them e01 and w03', async () => {
+  const r = await rig({ names: { e: 'e01', w: 'w03' } }); const out = await r.run(); r.close();
+  assert.equal(out.verdict, 'pass', JSON.stringify(out.checks));
+});
+
+test('older names (e0 / w1) work as well, and an explicit name wins over the automatic choice', async () => {
+  const r = await rig({ names: { e: 'e0', w: 'w1' } }); const a = await r.run(); const b = await r.run({ ingress: 'e0', egress: 'w1' }); r.close();
+  assert.equal(a.verdict, 'pass'); assert.equal(b.verdict, 'pass');
+  const r2 = await rig(); const wrong = await r2.run({ ingress: 'e9' }); r2.close();
+  assert.equal(wrong.verdict, 'fail'); assert.match(wrong.checks[0].text, /"e9"/);
 });

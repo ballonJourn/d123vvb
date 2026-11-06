@@ -18,11 +18,13 @@
 import dgram from 'node:dgram';
 import * as P from './protocol.mjs';
 import { delta32, readBoardStats } from '../d133.mjs';
+import { pickInterfaces } from './locate.mjs';
 
 const ifOf = (sample, name) => sample.ifs?.find(i => i.name === name) ?? null;
 const d = (a, b, k) => Number.isFinite(a?.[k]) && Number.isFinite(b?.[k]) ? delta32(b[k], a[k]) : null;
 
-export function evaluate({ before, after, count, datagramBytes, ingress = 'e0', egress = 'w1', noisePkts }) {
+export function evaluate({ before, after, count, datagramBytes, ingress, egress, noisePkts }) {
+  ({ ingress, egress } = pickInterfaces(after.ifs, { ingress, egress }));
   // other traffic during the run (ARP, the two reads of the stats port): about ten packets; never more tolerance than 2 % of what was sent
   noisePkts ??= Math.max(20, Math.round(count * 0.02));
   const ipBytes = datagramBytes + P.UDP_IP_OVERHEAD;
@@ -30,7 +32,8 @@ export function evaluate({ before, after, count, datagramBytes, ingress = 'e0', 
   const checks = [];
   const add = (id, status, text) => checks.push({ id, status, text });
   if (!e0a || !e0b || !w1a || !w1b) {
-    add('interfaces', 'fail', `the board's stats do not list ${!e0b ? ingress : egress}; interfaces seen: ${(after.ifs ?? []).map(i => i.name).join(', ') || 'none'} (set D133_INGRESS_IF / D133_EGRESS_IF)`);
+    const seen = (after.ifs ?? []).map(i => `${i.name} ${i.ip}${i.up ? '' : ' (down)'}`).join(', ') || 'none';
+    add('interfaces', 'fail', `cannot find the ${!ingress || !e0b ? `ingress (Ethernet, "${ingress ?? 'e...'}")` : `egress (WiFi, "${egress ?? 'w...'}")`} interface; the board lists: ${seen}. Name them with --ingress / --egress (D133_INGRESS_IF / D133_EGRESS_IF for the dashboard)`);
     return { checks, verdict: 'fail', measured: null };
   }
   const m = {
@@ -74,9 +77,11 @@ export function evaluate({ before, after, count, datagramBytes, ingress = 'e0', 
 }
 
 /** Sends `count` datagrams (DATA frames of `payload` bytes) at about `pps`, reading the board before and after. */
-export async function calibrate({ to, board, count = 1000, payload = 1000, pps = 500, settleMs = 1500, ingress = 'e0', egress = 'w1', log = () => {} }) {
+export async function calibrate({ to, board, count = 1000, payload = 1000, pps = 500, settleMs = 1500, ingress, egress, log = () => {} }) {
   const [toHost, toPort] = to, [bHost, bPort] = board;
   const before = await readBoardStats(bHost, bPort);
+  const names = pickInterfaces(before.ifs, { ingress, egress });
+  log(`interfaces: ${names.ingress ?? '?'} in, ${names.egress ?? '?'} out${names.ambiguous.length ? ` (also candidates: ${names.ambiguous.join(', ')}; choose with --ingress / --egress)` : ''}`);
   log(`board ${bHost}:${bPort} read, uptime ${(before.uptime_ms / 1000).toFixed(0)} s; sending ${count} datagrams of ${payload + P.DATA_HEADER} bytes to ${toHost}:${toPort} at ${pps} pkt/s`);
   const sock = dgram.createSocket('udp4'); await new Promise(r => sock.bind(0, r));
   const body = Buffer.alloc(payload, 0x5a), t0 = performance.now(); let sent = 0, errors = 0;
@@ -91,6 +96,6 @@ export async function calibrate({ to, board, count = 1000, payload = 1000, pps =
   await new Promise(r => setTimeout(r, settleMs));
   sock.close();
   const after = await readBoardStats(bHost, bPort);
-  const r = evaluate({ before, after, count: count - errors, datagramBytes: payload + P.DATA_HEADER, ingress, egress });
+  const r = evaluate({ before, after, count: count - errors, datagramBytes: payload + P.DATA_HEADER, ingress: names.ingress, egress: names.egress });
   return { ...r, sent: count, sendErrors: errors, seconds: (after.uptime_ms - before.uptime_ms) / 1000 };
 }

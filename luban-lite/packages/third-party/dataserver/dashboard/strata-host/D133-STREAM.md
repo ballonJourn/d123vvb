@@ -62,22 +62,27 @@ jitter, frames ok / dropped, queue drops, datagrams and bytes received, highest 
 | Run iperf first: where does loss begin | **Find the limit** (`ramp.mjs`, CLI `--mode ramp`) steps the rate up and reports the last loss-free step; `calibrate` checks the board's counters against a known packet count. (iperf itself is not replaced) | node `control.test`, `stream.test` (finds the limit of a simulated forwarder); the real limit: board |
 | Pick by the numbers: lower the bitrate if close to the limit | adaptive mode | node |
 | A pair of PC tools following that header | `server/stream/cli.mjs` `send` / `recv` (also `--source stdin`) | node `cli.test` (as separate processes) |
-| In the dashboard: rate, loss, reordering, jitter next to the board's e0 / w1 curves, so you see which segment loses | `D133Stream.tsx` (path: PC1 → e0 → w1 → PC2 with the loss per segment), `locate.mjs`, `engine.mjs`; interface cards and table in `D133Board.tsx` | node `control.test`, `engine.test`, `stream.test` (loss injected in the cable / inside the D133 / WiFi is found in that segment); screenshot of the page in the simulation |
+| In the dashboard: rate, loss, reordering, jitter next to the board's Ethernet / WiFi interface curves, so you see which segment loses | `D133Stream.tsx` (path: PC1 → e0 → w1 → PC2 with the loss per segment), `locate.mjs`, `engine.mjs`; interface cards and table in `D133Board.tsx` | node `control.test`, `engine.test`, `stream.test` (loss injected in the cable / inside the D133 / WiFi is found in that segment); screenshot of the page in the simulation |
 | "Replace the Pull area" | the Pull form moved to a **Batch** section at the bottom (it is the batch plane); it was not deleted | — |
 | Option: take the D133 out of the path | the tools only need the receiver's address: `send --to <PC2>:5600` works with no board | node `cli.test` runs sender and receiver directly |
 
 ## What only the board can confirm
 
 `cli.mjs calibrate` sends an exact number of packets through the board and compares the board's counters
-before and after. It checks: packets arrive at e0 (`rx_pkts + rx_drop` = sent), the byte count per packet
-(is the 14 byte Ethernet header counted? the answer decides `D133_L2_BYTES`), packets leave w1,
+before and after. It checks: packets arrive at the Ethernet interface (`rx_pkts + rx_drop` = sent), the byte count per packet
+(is the 14 byte Ethernet header counted? the answer decides `D133_L2_BYTES`), packets leave the WiFi interface,
 nothing is refused at a gentle rate, both interfaces frame alike, and `ip_forwarded` counts them.
 Run it first after flashing; anything that is not PASS names what to look at.
 
 The SDK source confirms the premise of the refusal counter: both the Ethernet port (`ethernetif.c`) and the
 WiFi port (`wlan_lwip.c`) call `netif->input` and free the pbuf on an error, and lwIP's `tcpip_inpkt`
 returns `ERR_MEM` when the mailbox or the message pool is full without counting it. That the hook itself
-does not disturb the network on e0 and w1 has not been run on hardware.
+does not disturb the network on the Ethernet and WiFi interfaces has not been run on hardware.
+
+Interface names: lwIP names an interface with two letters and an index, so on the real board they are
+**`e01`** (Ethernet) and **`w03`** (WiFi AP), read from its stats line. The tools find them by the first letter
+(`e...` in, `w...` out, first one that is up and has an address); `--ingress` / `--egress` and
+`D133_INGRESS_IF` / `D133_EGRESS_IF` override.
 
 ## Limits to know
 

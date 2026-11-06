@@ -39,3 +39,21 @@ export function meanLast(values, n = 5) {
   const v = (values ?? []).slice(-n).filter(x => typeof x === 'number' && Number.isFinite(x));
   return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
 }
+
+/**
+ * Which board interfaces carry the stream: the Ethernet one in, the WiFi one out.
+ * lwIP names an interface with two letters and its index, so this board's are "e01" (e0 + 1) and
+ * "w03" (w0 + 3), not "e0" / "w1". A name given explicitly wins; otherwise the first interface that is up,
+ * has an address and starts with "e" (in) or "w" (out). `ambiguous` lists the other candidates.
+ */
+export function pickInterfaces(ifs, { ingress, egress } = {}) {
+  const usable = (ifs ?? []).filter(i => i.up && i.ip && i.ip !== '0.0.0.0');
+  const pick = (explicit, letter) => {
+    if (explicit) return { name: explicit, others: [] };
+    const named = list => list.filter(i => i.name?.toLowerCase().startsWith(letter)).map(i => i.name);
+    const c = named(usable).length ? named(usable) : named(ifs ?? []);            // none up: a down one is still better than none
+    return { name: c[0] ?? null, others: c.slice(1) };
+  };
+  const i = pick(ingress, 'e'), o = pick(egress, 'w');
+  return { ingress: i.name, egress: o.name, ambiguous: [...i.others, ...o.others] };
+}

@@ -9,7 +9,7 @@
  *   producer | node cli.mjs send --to ... --source stdin           your own frames: each is a 4 byte big endian length, then the bytes
  *   node cli.mjs calibrate --to PC2:5600 --board 192.168.1.1       checks the board's counters against a known number of packets
  *
- * calibrate: --board HOST[:STATPORT] (9001) --count 1000 --payload 1000 --pps 500 --ingress e0 --egress w1
+ * calibrate: --board HOST[:STATPORT] (9001) --count 1000 --payload 1000 --pps 500 --ingress NAME --egress NAME   (default: found automatically; this board: e01 and w03)
  * Options: --fps 30 --queue 4 --pacing 0.5 --mtu 1400 --stream 1 --duration SECONDS --json
  *          recv: --report-ms 500 --queue 8
  * Rates take k / M / G suffixes (bits per second of frame payload).
@@ -114,7 +114,7 @@ export async function main(argv) {
     const to = f.to && /^[^:]+:\d+$/.test(f.to) ? [f.to.slice(0, f.to.lastIndexOf(':')), Number(f.to.slice(f.to.lastIndexOf(':') + 1))] : null;
     if (!to) throw new Error('calibrate needs --to PC2_ADDRESS:PORT (any free UDP port on the other side of the board)');
     const r = await calibrate({ to, board: hp(f.board, 9001, '--board HOST[:STATPORT]'), count: Number(f.count ?? 1000), payload: Number(f.payload ?? 1000), pps: Number(f.pps ?? 500),
-      ingress: f.ingress ?? 'e0', egress: f.egress ?? 'w1', log: m => { if (!json) console.log(m); } });
+      ingress: f.ingress, egress: f.egress, log: m => { if (!json) console.log(m); } });
     if (json) console.log(JSON.stringify(r));
     else {
       for (const c of r.checks) console.log(`${{ pass: 'PASS', warn: 'WARN', fail: 'FAIL' }[c.status]}  ${c.id.padEnd(10)} ${c.text}`);

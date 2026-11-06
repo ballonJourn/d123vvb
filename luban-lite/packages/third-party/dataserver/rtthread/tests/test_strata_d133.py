@@ -102,6 +102,7 @@ class StrataApiTest(unittest.TestCase):
         assert cls.ds.stdout.readline().startswith("READY")
         cls.out = os.path.join(cls.work, "out")
         env = dict(os.environ, STRATA_PORT=str(cls.web), HOME=os.path.join(cls.work, "home"),
+                   D133_INGRESS_IF="no-such-eth", D133_EGRESS_IF="no-such-wifi",     # the host's own eth0 is not a D133 interface
                    DATASERVER_HOST="127.0.0.1", DATASERVER_PORT=str(cls.port),
                    DATASERVER_STAT_PORT=str(cls.sport), DASHBOARD_OUT=cls.out)
         cls.host = subprocess.Popen(["node", "server/index.mjs", "--dist", "dist"], cwd=STRATA, env=env,

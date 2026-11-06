@@ -958,8 +958,8 @@ const d133 = createD133({
   statPort: Number(process.env.DATASERVER_STAT_PORT ?? 9001),
   outDir: resolve(process.env.DASHBOARD_OUT ?? join(process.env.USERPROFILE ?? process.env.HOME ?? homedir(), 'Downloads', 'd133-pull')),
 });
-// The board interfaces a stream passes: PC1 on the Ethernet port (e0), PC2 on the WiFi AP (w1).
-const d133stream = createStreamEngine({ peekBoard: () => d133.boardPeek(), ingressIf: process.env.D133_INGRESS_IF ?? 'e0', egressIf: process.env.D133_EGRESS_IF ?? 'w1' });
+// The board interfaces a stream passes: PC1 on the Ethernet port, PC2 on the WiFi AP. Found by name (e... in, w... out; this board: e01 and w03); D133_INGRESS_IF / D133_EGRESS_IF override.
+const d133stream = createStreamEngine({ peekBoard: () => d133.boardPeek(), ingressIf: process.env.D133_INGRESS_IF || undefined, egressIf: process.env.D133_EGRESS_IF || undefined });
 await cloudflare.inspect();
 
 /* --------------------------------------------------------------- routing --- */

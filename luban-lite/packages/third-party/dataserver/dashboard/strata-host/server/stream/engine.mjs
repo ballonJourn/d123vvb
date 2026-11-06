@@ -11,7 +11,7 @@
  */
 import { StreamSender } from './sender.mjs';
 import { StreamReceiver } from './receiver.mjs';
-import { locateLoss, meanLast } from './locate.mjs';
+import { locateLoss, meanLast, pickInterfaces } from './locate.mjs';
 import * as P from './protocol.mjs';
 
 const HISTORY = 180, EVENTS = 30, WINDOW = 5;
@@ -46,7 +46,7 @@ export function validate(p) {
   throw bad('role must be send or recv');
 }
 
-export function createStreamEngine({ peekBoard = () => null, ingressIf = 'e0', egressIf = 'w1' } = {}) {
+export function createStreamEngine({ peekBoard = () => null, ingressIf, egressIf } = {}) {
   let run = null;
 
   const note = (r, text) => { r.events.push({ t: Date.now(), text }); if (r.events.length > EVENTS) r.events.shift(); };
@@ -105,13 +105,14 @@ export function createStreamEngine({ peekBoard = () => null, ingressIf = 'e0', e
   function pathOf(r) {
     const tx = r.tx, h = tx.history;
     const board = peekBoard(), bh = board?.history?.ifs ?? {};
+    const { ingress: inName, egress: outName, ambiguous } = pickInterfaces(board?.ifs, { ingress: ingressIf, egress: egressIf });
     const rate = (name, key) => meanLast(bh[name]?.[key], WINDOW);
     const sum = (a, b) => a == null ? null : a + (b ?? 0);
-    const e0Rx = sum(rate(ingressIf, 'rx_pps'), rate(ingressIf, 'rx_drop'));     // arrived at e0 = accepted + refused
-    const w1Tx = rate(egressIf, 'tx_pps');
+    const e0Rx = inName ? sum(rate(inName, 'rx_pps'), rate(inName, 'rx_drop')) : null;     // arrived on the Ethernet side = accepted + refused
+    const w1Tx = outName ? rate(outName, 'tx_pps') : null;
     const m = { tx: meanLast(h.txPps, WINDOW), e0Rx: board?.ok ? e0Rx : null, w1Tx: board?.ok ? w1Tx : null, rx: meanLast(h.rxPps, WINDOW) };
-    return { window: WINDOW, ingressIf, egressIf, rates: m, located: locateLoss(m),
-             boardRefused: { e0RxDrop: rate(ingressIf, 'rx_drop'), w1TxErr: rate(egressIf, 'tx_err') } };
+    return { window: WINDOW, ingressIf: inName ?? ingressIf ?? 'e?', egressIf: outName ?? egressIf ?? 'w?', ambiguous, rates: m, located: locateLoss(m),
+             boardRefused: { e0RxDrop: inName ? rate(inName, 'rx_drop') : null, w1TxErr: outName ? rate(outName, 'tx_err') : null } };
   }
 
   function state() {

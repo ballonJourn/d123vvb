@@ -3,7 +3,7 @@
  *
  *   stream (D133Stream)  UDP PC1 -> D133 -> PC2: rate, loss, reorder, jitter, round trip, frames,
  *                        and where on the path the loss happens
- *   interfaces           e0 / w0 / w1: bytes, packets, refused frames, driver errors, per second
+ *   interfaces           e01 (Ethernet) and w03 (WiFi AP) on this board: bytes, packets, refused frames, driver errors, per second
  *   lwIP (D133Lwip)      drop counters, buffer pools and the limits they are read against
  *   batch                after the fact: pull a directory off the SD card over dataServer (TCP)
  *
@@ -100,7 +100,7 @@ export function D133BoardScreen() {
             sub={`\u2193 ${rate(i.rx_rate)} \u00b7 ${pps(i.rx_pps)}  \u2191 ${rate(i.tx_rate)} \u00b7 ${pps(i.tx_pps)}${num(i.rx_drop_rate) && i.rx_drop_rate > 0 ? `  \u00b7 refused ${perSec(i.rx_drop_rate)}` : ''}${num(i.tx_err_rate) && i.tx_err_rate > 0 ? `  \u00b7 driver errors ${perSec(i.tx_err_rate)}` : ''}${i.up ? '' : ' \u00b7 down'}`}
             chart={<ReferenceSpark label={`${i.name} traffic`} primaryLabel="Received" data={h.rx.map(kb)} secondary={{ data: h.tx.map(kb), label: 'Sent', tone: `color-mix(in srgb,${tone} 55%,var(--st-ink))` }} unit="KB/s" timestamps={t} tone={tone}/>}/>;
         }) : <section className="st-card monitor-metric"><Empty icon="link" title={tr(board?.ok === false ? 'Board not reachable' : 'Waiting for the board')} body={tr('Interface counters appear once the stats port answers.')}/></section>)}
-        <MonitorMetric label={tr('IP forwarding e0 \u2194 w1')} icon="branch" source="lwIP ip.fw"
+        <MonitorMetric label={tr('IP forwarding (Ethernet \u2194 WiFi)')} icon="branch" source="lwIP ip.fw"
           value={board?.fwRate != null ? `${board.fwRate.toFixed(1)}` : '\u2014'} unit={board?.fwRate != null ? 'pkt/s' : undefined}
           sub={board?.ipForwarded != null ? `${board.ipForwarded} packets forwarded` : 'The board was built without RT_LWIP_STATS: forwarded packets are not counted'}
           chart={<div className="xs muted">{tr('Ethernet PC \u2194 board \u2194 WiFi PC. Both interfaces above also count forwarded traffic.')}</div>}/>

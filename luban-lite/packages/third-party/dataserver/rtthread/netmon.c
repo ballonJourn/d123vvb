@@ -1,5 +1,5 @@
 /*
- * netmon: byte/packet counters on every lwIP netif (e0, w0, w1).
+ * netmon: byte/packet counters on every lwIP netif (named as lwIP does: two letters and the index, e.g. e01, w03).
  *
  * The hook technique (save netif->input / netif->linkoutput, swap in a wrapper
  * with interrupts disabled, call the saved function from the wrapper) is taken

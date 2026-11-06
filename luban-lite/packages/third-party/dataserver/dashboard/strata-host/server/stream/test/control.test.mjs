@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AdaptiveRate } from '../adapt.mjs';
 import { RampSearch } from '../ramp.mjs';
-import { locateLoss, meanLast } from '../locate.mjs';
+import { locateLoss, meanLast, pickInterfaces } from '../locate.mjs';
 
 const M = 1e6;
 const rep = (expected, lost) => ({ expected, lost });
@@ -135,4 +135,24 @@ test('meanLast averages the last n numbers and skips gaps', () => {
   assert.equal(meanLast([1, 2, 3, 4, 5, 6], 3), 5);
   assert.equal(meanLast([null, 2, null, 4], 4), 3);
   assert.equal(meanLast([], 5), null); assert.equal(meanLast(undefined), null);
+});
+
+const NIC = (name, ip = '192.168.1.1', up = 1) => ({ name, ip, up });
+
+test('interfaces: the real board names (e01 = Ethernet, w03 = WiFi AP) are found', () => {
+  assert.deepEqual(pickInterfaces([NIC('w03', '192.168.169.1'), NIC('e01')]), { ingress: 'e01', egress: 'w03', ambiguous: [] });
+});
+
+test('interfaces: other naming schemes, an explicit name wins, extra candidates are listed', () => {
+  assert.deepEqual(pickInterfaces([NIC('e0'), NIC('w1', '192.168.169.1')]), { ingress: 'e0', egress: 'w1', ambiguous: [] });
+  assert.equal(pickInterfaces([NIC('e01'), NIC('w03'), NIC('w00', '10.0.0.5')], { egress: 'w00' }).egress, 'w00');
+  const two = pickInterfaces([NIC('e01'), NIC('w03'), NIC('w00', '10.0.0.5')]);
+  assert.equal(two.egress, 'w03'); assert.deepEqual(two.ambiguous, ['w00']);
+});
+
+test('interfaces: a down interface or one without an address is not chosen while another is usable, but is still better than none', () => {
+  assert.equal(pickInterfaces([NIC('w00', '0.0.0.0'), NIC('w03', '192.168.169.1'), NIC('e01')]).egress, 'w03');
+  assert.equal(pickInterfaces([NIC('w03', '192.168.169.1', 0), NIC('e01', '192.168.1.1', 0)]).egress, 'w03');
+  assert.deepEqual(pickInterfaces([NIC('lo', '127.0.0.1')]), { ingress: null, egress: null, ambiguous: [] });
+  assert.deepEqual(pickInterfaces(undefined), { ingress: null, egress: null, ambiguous: [] });
 });

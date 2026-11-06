@@ -17,7 +17,7 @@ import { wireBytes } from '../protocol.mjs';
 
 const mulberry32 = a => () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
 
-export async function createPath({ receiver, port = 0, cable = {}, d133 = {}, wifi = {}, seed = 1, l2 = 14 }) {
+export async function createPath({ receiver, port = 0, cable = {}, d133 = {}, wifi = {}, seed = 1, l2 = 14, names = { e: 'e01', w: 'w03' } }) {
   const rnd = mulberry32(seed);
   const c = { sent: 0, cableDrops: 0, arrivedE0: 0, e0RxPkts: 0, e0RxBytes: 0, e0RxDrop: 0, e0TxPkts: 0, e0TxBytes: 0,
               w1TxPkts: 0, w1TxBytes: 0, w1TxErr: 0, w1RxPkts: 0, w1RxBytes: 0, wifiDrops: 0, delivered: 0, maxLen: 0 };
@@ -71,8 +71,8 @@ export async function createPath({ receiver, port = 0, cable = {}, d133 = {}, wi
   const snapshot = () => ({
     v: 1, uptime_ms: Math.round(performance.now() - t0) + 1000,
     ifs: [
-      { name: 'e0', ip: '192.168.1.1', up: 1, rx_bytes: u32(c.e0RxBytes), tx_bytes: u32(c.e0TxBytes), rx_pkts: u32(c.e0RxPkts), tx_pkts: u32(c.e0TxPkts), rx_drop: u32(c.e0RxDrop), tx_err: 0 },
-      { name: 'w1', ip: '192.168.169.1', up: 1, rx_bytes: u32(c.w1RxBytes), tx_bytes: u32(c.w1TxBytes), rx_pkts: u32(c.w1RxPkts), tx_pkts: u32(c.w1TxPkts), rx_drop: 0, tx_err: u32(c.w1TxErr) },
+      { name: names.e, ip: '192.168.1.1', up: 1, rx_bytes: u32(c.e0RxBytes), tx_bytes: u32(c.e0TxBytes), rx_pkts: u32(c.e0RxPkts), tx_pkts: u32(c.e0TxPkts), rx_drop: u32(c.e0RxDrop), tx_err: 0 },
+      { name: names.w, ip: '192.168.169.1', up: 1, rx_bytes: u32(c.w1RxBytes), tx_bytes: u32(c.w1TxBytes), rx_pkts: u32(c.w1RxPkts), tx_pkts: u32(c.w1TxPkts), rx_drop: 0, tx_err: u32(c.w1TxErr) },
     ],
     ip_forwarded: u32(c.w1TxPkts),
     lwip: { stats: 1, ip_drop: 0, ip_rterr: 0, ip_chkerr: 0, ip_lenerr: 0, ip_memerr: 0, link_drop: 0, link_memerr: 0, link_chkerr: 0, link_lenerr: 0,

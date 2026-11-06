@@ -89,8 +89,8 @@ dataserver: running, port 9000, root /data/adas, 2 workers, block 4096
 ```
 aic /> netmon
 if   ip              up       rx bytes    rx pkts     tx bytes    tx pkts  rx drop   tx err
-e0   192.168.1.1     yes        183402       1210       950112        822        0        0
-w1   192.168.169.1   yes        402118       3311      9120443       6551        0        0
+e01  192.168.1.1     yes        183402       1210       950112        822        0        0
+w03  192.168.169.1   yes        402118       3311      9120443       6551        0        0
 ip forwarded packets: 2310
 limits: pbuf pool 64, tcpip input messages 128, tcpip mailbox 8
 ip drop 0 rterr 0 memerr 0 | link drop 0 memerr 0
@@ -108,15 +108,18 @@ Each socket and each open file uses a DFS descriptor (`DFS_FD_MAX` = 16).
 
 ```
 $ nc 192.168.169.1 9001
-{"v":1,"uptime_ms":812345,"ifs":[{"name":"e0","ip":"192.168.1.1","up":1,"rx_bytes":183402,...,"rx_drop":0,"tx_err":0},
- {"name":"w1","ip":"192.168.169.1",...}],"ip_forwarded":2310,"lwip":{"stats":1,"ip_drop":0,...,"limits":{"pbuf_pool":64,
+{"v":1,"uptime_ms":812345,"ifs":[{"name":"e01","ip":"192.168.1.1","up":1,"rx_bytes":183402,...,"rx_drop":0,"tx_err":0},
+ {"name":"w03","ip":"192.168.169.1",...}],"ip_forwarded":2310,"lwip":{"stats":1,"ip_drop":0,...,"limits":{"pbuf_pool":64,
  "inpkt_pool":128,"mbox":8}},"dataserver":{"running":1,...}}
 ```
+
+Interface names are lwIP's two letters plus the index: on the real board `e01` (Ethernet) and `w03` (WiFi AP)
+(measured from its stats line, they are not `e0` / `w1`).
 
 The interface counters come from `netmon.c`, which wraps each lwIP netif's
 `input` and `linkoutput` the same way RT-Thread netutils `tcpdump` does
 (Apache-2.0, header kept), but only counts: no copy, no malloc on the data
-path. Everything that crosses e0 or w1 is counted: dataServer pulls, FTP,
+path. Everything that crosses the Ethernet or the WiFi interface is counted: dataServer pulls, FTP,
 iperf and packets forwarded between the Ethernet PC and the WiFi PC.
 
 * `rx_bytes` / `rx_pkts` and `tx_bytes` / `tx_pkts` count frames the stack (input) or the driver
@@ -207,7 +210,7 @@ The changes to upstream are listed in `../dashboard/strata-host/D133-CHANGES.md`
 ![D133 board screen](../dashboard/strata-host/d133_board.png)
 
 The screenshot is the host build of the board code (interfaces `lo`, `eth0`);
-on the board the cards are `Ethernet e0` and `WiFi w1`.
+on the board the cards are `Ethernet e01` and `WiFi w03`.
 
 The older Flask page (`../dashboard/client_web.py`, MusadiqPasha/file_transfer
 adapted to this protocol) still works for pulls without Node:
