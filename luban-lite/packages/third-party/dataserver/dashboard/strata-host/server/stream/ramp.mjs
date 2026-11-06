@@ -15,32 +15,41 @@
  * Delay comes before loss: a path that is offered a little too much first builds a queue (the round trip
  * rises step after step) and only drops when the queue is full. `delayKnee` is the last step before the round
  * trip rose by more than delayRiseMs above the lowest step AND stayed risen to the end of the search; one
- * stray spike is not a trend. `recommend` is 70 % of the lower of the two knees, rounded down to 0.1 Mbit/s.
+ * stray spike is not a trend (a run of one step counts only when that step also lost datagrams).
+ * `recommend` is 70 % of the lower of the two knees, rounded down to 0.1 Mbit/s.
+ *
+ * When the search reaches maxBps without any loss (reason "max") the limit was NOT found: `knee` stays null,
+ * `lossFreeTo` is the highest rate tested, and `recommend` is 70 % of that, a safe rate but not the limit.
  */
 export class RampSearch {
   constructor({ startBps, stepBps, maxBps, stepMs = 3000, minReports = 2, settleReports = 1, lossThreshold = 0.01, noFeedbackMs = 5000, minExpected = 300, minLost = 5, delayRiseMs = 30 }) {
     if (!(startBps > 0 && stepBps > 0 && maxBps >= startBps)) throw new RangeError('need 0 < start <= max and step > 0');
     Object.assign(this, { stepBps, maxBps, stepMs, minReports, settleReports, lossThreshold, noFeedbackMs, minExpected, minLost, delayRiseMs });
-    this.rate = startBps; this.results = []; this.done = false; this.knee = null; this.reason = null; this.delayKnee = null; this.recommend = null; this.rtts = [];
+    this.rate = startBps; this.results = []; this.done = false; this.knee = null; this.reason = null; this.delayKnee = null; this.recommend = null; this.lossFreeTo = null; this.rtts = [];
     this.startedAt = null; this.stepStart = null; this.reports = []; this.skipped = 0; this.lastReportAt = null;
   }
   begin(nowMs) { this.startedAt = this.stepStart = this.lastReportAt = nowMs; return this.rate; }
   /** A round trip sample (ms) taken while this step was running. */
   noteRtt(ms) { if (!this.done && Number.isFinite(ms) && ms >= 0) { this.rtts.push(ms); if (this.rtts.length > 64) this.rtts.shift(); } }
   finish(reason, knee) {
-    this.done = true; this.reason = reason; this.knee = knee;
-    this.delayKnee = this.findDelayKnee();
-    const lowest = [knee, this.delayKnee].filter(v => v !== null);
-    this.recommend = lowest.length ? Math.floor(Math.min(...lowest) * 0.7 / 1e5) * 1e5 : null;
+    this.done = true; this.reason = reason;
+    this.knee = reason === 'max' ? null : knee;                       // "max": no loss was found, so there is no loss knee
+    this.lossFreeTo = knee;                                            // the highest rate that was tested loss-free
+    this.delayKnee = this.findDelayKnee(reason === 'loss' ? 1 : 2);
+    const lowest = [this.knee, this.delayKnee].filter(v => v !== null);
+    const base = lowest.length ? Math.min(...lowest) : (reason === 'max' ? this.lossFreeTo : null);
+    this.recommend = base === null ? null : Math.floor(base * 0.7 / 1e5) * 1e5;
     return this.rate;
   }
-  findDelayKnee() {
+  /** minRun: how many steps the risen round trip must last at the end (1 is enough when that step also lost datagrams). */
+  findDelayKnee(minRun) {
     const steps = this.results, med = steps.map(x => x.rttMed).filter(Number.isFinite);
     if (steps.length < 2 || med.length < 2) return null;
     const limit = Math.min(...med) + this.delayRiseMs;
     let i = steps.length;
     while (i > 0 && Number.isFinite(steps[i - 1].rttEnd) && steps[i - 1].rttEnd > limit) i--;     // the run of risen steps that reaches the end
-    return i === steps.length || i === 0 ? null : steps[i - 1].bps;
+    const run = steps.length - i;
+    return run < minRun || i === 0 ? null : steps[i - 1].bps;
   }
   /** r: { expected, lost } of one report interval. Returns the target rate to use now. */
   onReport(r, nowMs) {

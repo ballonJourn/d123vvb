@@ -120,6 +120,11 @@ Interface names: lwIP names an interface with two letters and an index, so on th
   measures the ramp step again, and is not counted as "no reports". The CLI's console output goes through a pipe to a
   child process on a Windows console, so a stuck console blocks the child, not the stream (`printer.mjs`,
   D133_PRINT_CHILD=0 / 1).
+* **A search that reaches its maximum has not found the limit.** The first 5 GHz run (6 to 20 Mbit/s, no loss) was printed
+  as "loss begins above 20 Mbit/s", and one stray delay spike in the last step produced a "suggested 13.3 Mbit/s". Now
+  `reason: max` says "no loss up to X, the limit is higher" with `lossFreeTo`, has no loss knee, and suggests 70 % of the highest
+  rate tested as a safe rate; a delay knee needs the round trip to stay risen for at least two steps at the end (one step is
+  enough only when that step also lost datagrams).
 * **Delay comes before loss.** A path offered a little too much first builds a queue (the round trip rises)
   and drops only when the queue is full, so the rate-limit search reports two knees: where loss begins and where
   the round trip starts to rise (more than 30 ms above the lowest step and still risen at the end of the search;

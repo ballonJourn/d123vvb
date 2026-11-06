@@ -182,7 +182,12 @@ Why the AP was on 2.4 GHz channel 6: `rt_wlan_start_ap()` had `channel = 6` and 
 and the AIC glue (`aic8800_softap`) already chooses the band from the channel number. The glue also hard-codes a
 20 MHz channel; `AIC_WLAN_AP_BW_40M` (menuconfig, AIC8800 wlan driver, default off) switches it to 40 MHz.
 
-What the source does not tell: whether the AIC8800D40L *hardware* has a 5 GHz radio. The SDK's driver is built with
+Measured on the real board: `wifi ap ADAS_D133 adas123456 36` restarts the AP, the PC reconnects and reports
+band 5 GHz channel 36; a ramp from 6 to 20 Mbit/s had no loss at all (2.4 GHz: loss from 10-14 Mbit/s) while the board's CPU
+(`top`) rose from 4 % to 27 %. The defconfig boot command is now `wifi ap ADAS_D133 adas123456 36`; if a 5 GHz start fails,
+`wifi ap` falls back to channel 6. `wifi scan` returns error -10 on this firmware (no STA device, only the AP).
+
+(Before that was measured:) What the source does not tell: whether the AIC8800D40L *hardware* has a 5 GHz radio. The SDK's driver is built with
 `USE_5G` and treats the D40L as the D80 family (`wifi_port.h`: `CHIP_SELECT_AIC8800D40L` -> `PRODUCT_ID_AIC8800D80`;
 only DC and DW have 5 GHz switched off in `rwnx_main.c`), but that is software. Try it:
 `wifi scan` on the board lists networks with their channel (a 5 GHz network seen = the radio receives 5 GHz), or start

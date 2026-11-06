@@ -533,7 +533,12 @@ static int wifi_ap(int argc, char *argv[])
         rt_kprintf("channel %d is not supported: 2.4G 1..13, 5G 36 40 44 48 149 153 157 161 165\n", channel);
         return -1;
     }
-    rt_wlan_start_ap_channel(ssid, key, channel);
+    if (rt_wlan_start_ap_channel(ssid, key, channel) != RT_EOK && rt_wlan_ap_channel_is_5g(channel))
+    {
+        /* A 5 GHz start that fails must not leave the board without WiFi: go back to the 2.4 GHz default. */
+        rt_kprintf("start ap on channel %d failed, falling back to channel %d (2.4 GHz)\n", channel, RT_WLAN_AP_DEFAULT_CHANNEL);
+        rt_wlan_start_ap_channel(ssid, key, RT_WLAN_AP_DEFAULT_CHANNEL);
+    }
     return 0;
 }
 

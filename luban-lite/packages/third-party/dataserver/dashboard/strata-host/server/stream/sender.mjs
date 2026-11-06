@@ -166,7 +166,7 @@ export class StreamSender extends EventEmitter {
     if (rate !== this.bitrate) { this.setBitrate(rate); this.emit('ramp-step', { bitrate: this.bitrate, results: this.ramp.results }); }
     if (this.ramp.done && !this.rampDoneEmitted) {
       this.rampDoneEmitted = true;
-      this.emit('ramp-done', { knee: this.ramp.knee, delayKnee: this.ramp.delayKnee, recommend: this.ramp.recommend, reason: this.ramp.reason, results: this.ramp.results });
+      this.emit('ramp-done', { knee: this.ramp.knee, lossFreeTo: this.ramp.lossFreeTo, delayKnee: this.ramp.delayKnee, recommend: this.ramp.recommend, reason: this.ramp.reason, results: this.ramp.results });
     }
   }
 
@@ -219,7 +219,7 @@ export class StreamSender extends EventEmitter {
       reportAgeMs: this.lastReportAtMs === null ? null : Math.round(now - this.lastReportAtMs),
       lastReport: r ? { ...r } : null,
       adapt: this.adapt ? { last: this.adapt.last, hold: this.adapt.hold } : null,
-      ramp: this.ramp ? { done: this.ramp.done, knee: this.ramp.knee, delayKnee: this.ramp.delayKnee, recommend: this.ramp.recommend, reason: this.ramp.reason, results: this.ramp.results, rate: this.ramp.rate } : null,
+      ramp: this.ramp ? { done: this.ramp.done, knee: this.ramp.knee, lossFreeTo: this.ramp.lossFreeTo, delayKnee: this.ramp.delayKnee, recommend: this.ramp.recommend, reason: this.ramp.reason, results: this.ramp.results, rate: this.ramp.rate } : null,
     };
   }
 }

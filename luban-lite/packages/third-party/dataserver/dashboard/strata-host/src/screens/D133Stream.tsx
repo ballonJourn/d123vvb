@@ -146,6 +146,11 @@ export function D133Stream() {
       <div className="section-toolbar"><h2 className="h4">{tr('Rate limit search')}</h2>
         <Pill tone={s.ramp.done ? (s.ramp.knee === null && s.ramp.delayKnee == null ? 'danger' : 'accent') : 'warn'} dot>{tr(s.ramp.done ? 'Finished' : 'Running')}</Pill></div>
       {tr(s.ramp.done ? (s.ramp.reason === 'no-data' ? <p className="small">{tr('The receiver saw nothing during a step, so nothing was measured. Is the receiver running and reachable?')}</p>
+        : s.ramp.reason === 'max' ? <div className="stack">
+            <p className="small"><strong>{tr(`No loss up to ${bps(s.ramp.lossFreeTo)}, the highest rate tested: the limit is higher.`)}</strong>{tr(' Run it again with a higher maximum to find it.')}</p>
+            <p className="small">{tr(s.ramp.delayKnee == null ? 'The round trip stayed low: no sustained rise.' : `The round trip starts to rise above ${bps(s.ramp.delayKnee)}: a queue builds.`)}</p>
+            {s.ramp.recommend != null ? <p className="small"><strong>{tr(`A safe sustained rate: at least about ${bps(s.ramp.recommend)}`)}</strong>{tr(' (70 % of the highest rate tested or of the delay knee).')}</p> : null}
+          </div>
         : s.ramp.knee === null && s.ramp.delayKnee == null ? <p className="small">{tr(`No sustainable rate found (${s.ramp.reason}).`)}</p>
         : <div className="stack">
             <p className="small">{tr(s.ramp.knee === null ? 'No loss-free step.' : `Loss begins above ${bps(s.ramp.knee)} (application bitrate).`)}</p>

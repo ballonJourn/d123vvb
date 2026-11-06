@@ -63,9 +63,11 @@ test('ramp: stops at the first step that loses and reports the step below as the
   assert.ok(r.results.at(-1).loss > 0.01 && r.results.at(-2).loss === 0);
 });
 
-test('ramp: a path that carries everything ends at max', () => {
+test('ramp: a path that carries everything ends at max: no loss knee, the limit is not found', () => {
   const r = runRamp(100 * M);
-  assert.equal(r.reason, 'max'); assert.equal(r.knee, 12 * M);
+  assert.equal(r.reason, 'max'); assert.equal(r.knee, null);                    // no loss was seen, so there is no loss knee
+  assert.equal(r.lossFreeTo, 12 * M);                                           // the highest rate tested
+  assert.equal(r.recommend, 8.4 * M);                                           // 70 % of that: a safe rate, not the limit
 });
 
 test('ramp: loss already at the first step means no sustainable rate (knee null)', () => {
@@ -226,4 +228,55 @@ test('ramp: the user\'s second real run: 6..11 Mbit/s, round trip 20-50 ms then 
   assert.equal(r.reason, 'loss'); assert.equal(r.knee, 10 * M);                  // "loss begins above 10 Mbit/s", as the tool printed
   assert.equal(r.delayKnee, 9 * M);                                              // the round trip was already rising at 10 Mbit/s
   assert.equal(r.recommend, 6.3 * M);                                            // 70 % of 9 Mbit/s
+});
+
+test('ramp: the real run on the 5 GHz AP (6..20 Mbit/s, no loss, one 168 ms spike and a last step at 61 ms): the limit is not reached and one late spike is not a delay knee', () => {
+  // per step, read off the output: round trip median and end-of-step in ms
+  const med = [3, 7, 12, 7, 5, 11, 13, 30, 33, 14, 16, 19, 7, 16, 57], end = [3, 7, 12, 11, 7, 4, 14, 168, 17, 21, 17, 19, 7, 16, 61];
+  const r = new RampSearch({ startBps: 6 * M, stepBps: 1 * M, maxBps: 20 * M, stepMs: 1000, minReports: 1, settleReports: 0, minExpected: 0, minLost: 5, delayRiseMs: 30 });
+  r.begin(0);
+  for (let i = 0; i < med.length; i++) { r.rtts = [med[i], end[i] - 1, end[i]]; r.onReport(rep(1000, 0), (i + 1) * 1000); }
+  assert.equal(r.reason, 'max'); assert.equal(r.knee, null); assert.equal(r.lossFreeTo, 20 * M);
+  assert.equal(r.delayKnee, null);                                              // only the very last step is risen, and nothing was lost: not evidence
+  assert.equal(r.recommend, 14 * M);                                            // 70 % of 20; the old tool said 13.3 from that one spike
+});
+
+test('ramp: a risen round trip that lasts two steps at the end is a delay knee even without loss', () => {
+  const r = new RampSearch({ startBps: 6 * M, stepBps: 1 * M, maxBps: 10 * M, stepMs: 1000, minReports: 1, settleReports: 0, minExpected: 0, minLost: 5, delayRiseMs: 30 });
+  r.begin(0);
+  const end = [10, 11, 12, 90, 160];
+  for (let i = 0; i < end.length; i++) { r.rtts = [end[i], end[i]]; r.onReport(rep(1000, 0), (i + 1) * 1000); }
+  assert.equal(r.reason, 'max'); assert.equal(r.knee, null); assert.equal(r.delayKnee, 8 * M);
+  assert.equal(r.recommend, 5.6 * M);                                           // 70 % of the delay knee
+});
+
+/** drives a ramp whose steps carry the given [median, end-of-step] round trips (ms), no loss, ending at the last step */
+function runMeasured(startM, medEnd) {
+  const r = new RampSearch({ startBps: startM * M, stepBps: 1 * M, maxBps: (startM + medEnd.length - 1) * M, stepMs: 1000, minReports: 1, settleReports: 0, minExpected: 0, minLost: 5, delayRiseMs: 30 });
+  r.begin(0);
+  medEnd.forEach(([med, end], i) => { r.rtts = [med, Math.max(med, end - 1), end]; r.onReport(rep(1000, 0), (i + 1) * 1000); });
+  return r;
+}
+
+test('ramp: the real 5 GHz run (6..20 Mbit/s, no loss, a spike at 13 and one at the last step): no limit found, no trend', () => {
+  // [median, end of step] of the 15 steps as the tool printed them
+  const r = runMeasured(6, [[3, 3], [7, 7], [12, 12], [7, 11], [5, 7], [11, 4], [13, 14], [30, 168], [33, 17], [14, 21], [16, 17], [19, 19], [7, 7], [16, 16], [57, 61]]);
+  assert.equal(r.reason, 'max'); assert.equal(r.knee, null);                     // not "loss begins above 20"
+  assert.equal(r.lossFreeTo, 20 * M);
+  assert.equal(r.delayKnee, null);                                               // the spike at 13 came back down; one risen last step is not a trend
+  assert.equal(r.recommend, 14 * M);                                             // "at least": 70 % of the highest rate tested
+});
+
+test('ramp: ending at max with the round trip risen for two steps is a delay knee', () => {
+  const r = runMeasured(6, [[10, 10], [11, 12], [10, 11], [11, 10], [60, 70], [90, 120]]);
+  assert.equal(r.reason, 'max'); assert.equal(r.knee, null);
+  assert.equal(r.delayKnee, 9 * M);                                              // 6 7 8 9 stayed low, 10 and 11 are risen
+  assert.equal(r.recommend, 6.3 * M);
+});
+
+test('ramp: a loss at the last step is enough evidence by itself (a run of one risen step)', () => {
+  const r = new RampSearch({ startBps: 6 * M, stepBps: 1 * M, maxBps: 20 * M, stepMs: 1000, minReports: 1, settleReports: 0, minExpected: 0, minLost: 5, delayRiseMs: 30 });
+  r.begin(0);
+  [[10, 10, 0], [11, 12, 0], [10, 11, 0], [200, 300, 300]].forEach(([med, end, lost], i) => { r.rtts = [med, end - 1, end]; r.onReport(rep(1000, lost), (i + 1) * 1000); });
+  assert.equal(r.reason, 'loss'); assert.equal(r.knee, 8 * M); assert.equal(r.delayKnee, 8 * M);
 });

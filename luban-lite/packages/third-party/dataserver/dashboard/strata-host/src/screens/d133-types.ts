@@ -40,7 +40,7 @@ export interface StreamStats {
   txPackets?: number; txBytes?: number; txPayload?: number; txFrames?: number; sendErrors?: number; queued?: number; queueDropped?: number;
   rttMs?: number | null; reports?: number; reportAgeMs?: number | null; lastReport?: StreamReport | null;
   adapt?: { last: string; hold: number } | null;
-  ramp?: { done: boolean; knee: number | null; delayKnee?: number | null; recommend?: number | null; reason: string | null; results: RampResult[]; rate: number } | null;
+  ramp?: { done: boolean; knee: number | null; lossFreeTo?: number | null; delayKnee?: number | null; recommend?: number | null; reason: string | null; results: RampResult[]; rate: number } | null;
   // receiver
   listening?: number; packets?: number; bytes?: number; unique?: number; expected?: number; lost?: number; lossFraction?: number | null; reordered?: number;
   duplicates?: number; tooLate?: number; lateFragments?: number; framesOk?: number; framesDropped?: number; openFrames?: number; jitterUs?: number;
@@ -60,5 +60,5 @@ export interface StreamHistory {
 export interface StreamState {
   role: 'idle' | 'send' | 'recv'; params: Record<string, unknown> | null; startedAt?: number; error: string | null;
   events: { t: number; text: string }[]; stats: StreamStats | null; history: StreamHistory | null;
-  rampResult?: { knee: number | null; delayKnee?: number | null; recommend?: number | null; reason: string; results: RampResult[] } | null; path: StreamPath | null;
+  rampResult?: { knee: number | null; lossFreeTo?: number | null; delayKnee?: number | null; recommend?: number | null; reason: string; results: RampResult[] } | null; path: StreamPath | null;
 }
