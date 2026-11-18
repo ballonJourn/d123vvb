@@ -15,6 +15,10 @@
 #include <stdint.h>
 #include "ble_img_rx.h"
 #include "chronos_nav.h"
+#include "rtconfig.h"
+#ifdef BLE_NAVI_ERYA
+#include "erya_proto.h"
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -34,6 +38,9 @@ struct ble_navi {
     struct chronos_nav  chronos; /* Chronos app compatibility  */
     struct ble_navi_link link;
     uint32_t            notify_fail;
+#ifdef BLE_NAVI_ERYA
+    struct erya         erya;    /* 尔雅 BLE 导航协议 (领骑摩托 app) */
+#endif
 };
 
 extern struct ble_navi g_ble_navi;
@@ -48,6 +55,13 @@ void ble_navi_on_data_write(const uint8_t *b, uint16_t n);
 void ble_navi_on_chronos_write(const uint8_t *b, uint16_t n);
 void ble_navi_on_chronos_subscribe(void);
 void ble_navi_release(uint8_t layer);     /* called by disp_sink after blit */
+#ifdef BLE_NAVI_ERYA
+void ble_navi_on_erya_write(uint16_t uuid16, const uint8_t *b, uint16_t n);
+void ble_navi_on_erya_subscribe(uint16_t uuid16);
+uint16_t ble_navi_erya_read(uint16_t uuid16, uint8_t *out, uint16_t cap);
+/* backend reports the identity address once synced: "6C21A22E66B8" */
+void ble_navi_erya_set_mac(const char *mac12);
+#endif
 /* BT is up once the AIC8800 driver has run aicbt_init; calls the vendor hook */
 int  ble_navi_bt_power_on(void);
 /*
@@ -62,6 +76,7 @@ int  ble_navi_bt_vendor_init(void);
 int  ble_port_start(const char *dev_name);              /* stack up + advertise */
 int  ble_port_notify_ctrl(const uint8_t *b, uint16_t n);
 int  ble_port_notify_chronos(const uint8_t *b, uint16_t n);
+int  ble_port_notify_erya(uint16_t uuid16, const uint8_t *b, uint16_t n);
 int  ble_port_request_phy(uint8_t phy_mask);            /* 1=1M 2=2M 4=coded */
 int  ble_port_request_conn(uint16_t min_ci, uint16_t max_ci, uint16_t lat, uint16_t to);
 void ble_port_refresh_link(struct ble_navi_link *l);    /* read current params */

@@ -68,4 +68,63 @@ config BLE_NAVI_TURN_SCALE
     range 1 4
     default 2
 
+config BLE_NAVI_ERYA
+    bool "尔雅 BLE 导航协议 Ver 1.2 (领骑摩托 app: 0xAAA1..0xAAAA, EY/EB frames)"
+    default y
+    select LPKG_USING_CJSON
+    help
+      GATT service with characteristics 0xAAA1..0xAAAA. The device name becomes
+      <prefix><BT MAC>, AAA5 carries "<MAC>&<model key>", the app sends JPEG
+      pictures on AAA7 and navigation JSON on AAA8.
+
+if BLE_NAVI_ERYA
+
+config BLE_NAVI_ERYA_SVC_UUID
+    hex "Primary service UUID (16-bit)"
+    default 0xAAA0
+    help
+      The protocol document lists the characteristics 0xAAA1..0xAAAA only, not
+      the service UUID. Change it if the app does not find the characteristics.
+
+config BLE_NAVI_ERYA_NAME_PREFIX
+    string "Device name prefix (name = prefix + MAC)"
+    default "EY_"
+
+config BLE_NAVI_ERYA_MODEL_KEY
+    string "车型 key (issued by 尔雅 after the business agreement)"
+    default ""
+
+config BLE_NAVI_ERYA_PIC_W
+    int "Requested picture width"
+    default 800
+config BLE_NAVI_ERYA_PIC_H
+    int "Requested picture height"
+    default 480
+config BLE_NAVI_ERYA_PIC_Q
+    int "Requested picture quality (120..200, ratio = value - 100)"
+    range 120 200
+    default 160
+config BLE_NAVI_ERYA_PIC_TYPE
+    string "Requested JPEG sampling (420 or 422)"
+    default "420"
+
+config BLE_NAVI_ERYA_DISP_X
+    int "Picture X on screen"
+    default 112
+config BLE_NAVI_ERYA_DISP_Y
+    int "Picture Y on screen"
+    default 60
+config BLE_NAVI_ERYA_DISP_W
+    int "Picture width on screen (0 = as received)"
+    default 0
+config BLE_NAVI_ERYA_DISP_H
+    int "Picture height on screen (0 = as received)"
+    default 0
+
+config BLE_NAVI_ERYA_MAX_PIC_BYTES
+    int "Largest accepted picture (bytes)"
+    default 524288
+
+endif
+
 endif

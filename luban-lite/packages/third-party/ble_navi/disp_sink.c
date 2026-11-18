@@ -232,6 +232,17 @@ int disp_sink_submit(const struct bir_frame *f)
     return 0;
 }
 
+int disp_sink_submit_owned(const struct bir_frame *f)
+{
+    struct disp_msg m = { .f = *f, .own_buf = 1 };
+    if (!s_mq || rt_mq_send(s_mq, &m, sizeof(m)) != RT_EOK) {
+        aicos_free_align(MEM_CMA, f->data);
+        s_st.drops++;
+        return -1;
+    }
+    return 0;
+}
+
 void disp_sink_turn_icon_1bpp(const uint8_t *bits, uint16_t w, uint16_t h)
 {
     if (!s_mq)

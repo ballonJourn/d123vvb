@@ -29,3 +29,17 @@ D133 作为 BLE 外设（GATT Server），接收手机或电脑发来的导航�
 导航画面请用 JPEG 格式：一帧 1024×600 约 20–60 KB。同样尺寸的 RGB565 原始数据有 1.2 MB，传一帧要十几秒。
 
 如果 `ble_navi start` 之后串口出现 `host reset` 或 HCI 超时，先用原厂工具 `bt_test -c 01 03 0c 00`（HCI_Reset）确认控制器有响应。
+
+## 尔雅 BLE 导航协议（领骑摩托 App）
+
+打开 `BLE_NAVI_ERYA`（默认打开）后，设备同时实现《尔雅 BLE 导航协议》Ver 1.2，可以直接用“领骑摩托” App 投屏。实现在 `erya_proto.c`（协议、分帧、拼图）和 `erya_json.c`（基于 SDK 的 cJSON），主机测试在 `tools/`（`make -C tools erya`）。
+
+- 设备名为 `EY_` 加蓝牙 MAC，例如 `EY_6C21A22E66B8`。广播里带服务 UUID 0xAAA0。
+- AAA5：手机连上后读到 `<MAC>&<车型key>`，未连接时为 `0`。手机写入 0x00（安卓）或 0x01（苹果）后，设备在 AAA4 通知 `-3`（仅 BLE），并在 AAA6 下发图片格式。
+- AAA7：EB 帧，JPEG 按包序号拼接；AAA8：EY 帧，导航文字。
+- 收齐的 JPEG 由 VE 硬解后显示在 (`BLE_NAVI_ERYA_DISP_X`, `BLE_NAVI_ERYA_DISP_Y`)；导航文字交给 `disp_ui_nav_update()`。
+- 串口执行 `ble_navi` 时，会多打印一行 `erya ...` 统计（图片成功/丢弃、包数、最后一张的大小和耗时）。
+
+**车型 key：** 协议要求 AAA5 里带尔雅发放的车型 key（`BLE_NAVI_ERYA_MODEL_KEY`，默认空）。没有正式 key 时 App 可能拒绝投屏，需要通过商务向尔雅申请。
+
+**文档里没写明、按假设实现的部分：** 服务 UUID 取 0xAAA0（`BLE_NAVI_ERYA_SVC_UUID` 可改）；AAA1～AAAA 全部开放读、写、无响应写和通知；AAA7/AAA8 按字节流解析，所以 App 一个包拆成多次写入或一次写入带多个包都能处理。

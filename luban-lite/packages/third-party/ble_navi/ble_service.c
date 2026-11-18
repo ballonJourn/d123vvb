@@ -61,6 +61,79 @@ static void ops_nav(void *ctx, const uint8_t *tlv, uint16_t n)
     disp_sink_nav(&ns);
 }
 
+/* ---------------- 尔雅 BLE 导航协议 ---------------- */
+#ifdef BLE_NAVI_ERYA
+#ifndef BLE_NAVI_ERYA_MODEL_KEY
+#define BLE_NAVI_ERYA_MODEL_KEY ""
+#endif
+static int erya_notify(void *ctx, uint16_t uuid, const uint8_t *b, uint16_t n)
+{
+    (void)ctx;
+    int rc = ble_port_notify_erya(uuid, b, n);
+    if (rc)
+        g_ble_navi.notify_fail++;
+    return rc;
+}
+static void erya_picture(void *ctx, uint8_t *buf, uint32_t len)
+{
+    (void)ctx;
+    struct bir_frame f;
+    memset(&f, 0, sizeof(f));
+    f.fmt = BNP_FMT_JPEG;
+    f.layer = BNP_LAYER_MAP;
+    f.x = BLE_NAVI_ERYA_DISP_X;
+    f.y = BLE_NAVI_ERYA_DISP_Y;
+    f.width = BLE_NAVI_ERYA_DISP_W;     /* 0 = as decoded */
+    f.height = BLE_NAVI_ERYA_DISP_H;
+    f.data = buf;
+    f.len = len;
+    f.rx_ms = ops_now(NULL);
+    disp_sink_submit_owned(&f);         /* sink frees buf */
+}
+static void erya_navi(void *ctx, const struct nav_state *ns)
+{
+    (void)ctx;
+    disp_sink_nav(ns);
+}
+
+static void erya_setup(void)
+{
+    struct erya_cfg cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    strcpy(cfg.mac, "000000000000");    /* replaced by the backend once synced */
+    rt_strncpy(cfg.model_key, BLE_NAVI_ERYA_MODEL_KEY, sizeof(cfg.model_key) - 1);
+    cfg.pic_w = BLE_NAVI_ERYA_PIC_W;
+    cfg.pic_h = BLE_NAVI_ERYA_PIC_H;
+    cfg.pic_q = BLE_NAVI_ERYA_PIC_Q;
+    rt_strncpy(cfg.pic_type, BLE_NAVI_ERYA_PIC_TYPE, sizeof(cfg.pic_type) - 1);
+    cfg.max_pic_bytes = BLE_NAVI_ERYA_MAX_PIC_BYTES;
+    struct erya_ops ops = { erya_notify, ops_alloc, ops_free, ops_now,
+                            erya_picture, erya_navi, NULL };
+    erya_init(&g_ble_navi.erya, &cfg, &ops);
+    if (!cfg.model_key[0])
+        rt_kprintf("[erya] BLE_NAVI_ERYA_MODEL_KEY is empty: the app may refuse the "
+                   "device until 尔雅 issues a 车型 key\n");
+}
+
+void ble_navi_erya_set_mac(const char *mac12)
+{
+    rt_strncpy(g_ble_navi.erya.cfg.mac, mac12, 12);
+    g_ble_navi.erya.cfg.mac[12] = 0;
+}
+void ble_navi_on_erya_write(uint16_t uuid, const uint8_t *b, uint16_t n)
+{
+    erya_on_write(&g_ble_navi.erya, uuid, b, n);
+}
+void ble_navi_on_erya_subscribe(uint16_t uuid)
+{
+    erya_on_subscribe(&g_ble_navi.erya, uuid);
+}
+uint16_t ble_navi_erya_read(uint16_t uuid, uint8_t *out, uint16_t cap)
+{
+    return erya_read(&g_ble_navi.erya, uuid, out, cap);
+}
+#endif
+
 /* ---------------- chronos hooks ---------------- */
 static int chronos_notify(void *ctx, const uint8_t *b, uint16_t n)
 {
@@ -124,6 +197,9 @@ int ble_navi_init(void)
     s_chronos_timer = rt_timer_create("chrinfo", chronos_timer_cb, RT_NULL,
                                       rt_tick_from_millisecond(CHRONOS_INFO_DELAY_MS),
                                       RT_TIMER_FLAG_ONE_SHOT | RT_TIMER_FLAG_SOFT_TIMER);
+#ifdef BLE_NAVI_ERYA
+    erya_setup();
+#endif
     ble_navi_bt_power_on();
     if (disp_sink_init() != 0)
         rt_kprintf("[ble_navi] display sink init failed, frames will be dropped\n");
@@ -134,6 +210,9 @@ void ble_navi_on_connect(uint16_t conn)
 {
     g_ble_navi.link.conn_handle = conn;
     rt_kprintf("[ble_navi] connected handle=%u\n", conn);
+#ifdef BLE_NAVI_ERYA
+    erya_on_connect(&g_ble_navi.erya);
+#endif
 }
 
 void ble_navi_on_disconnect(void)
@@ -142,6 +221,9 @@ void ble_navi_on_disconnect(void)
     g_ble_navi.link.att_mtu = 23;
     bir_on_disconnect(&g_ble_navi.rx);      /* partial frames kept for resume */
     chronos_nav_on_disconnect(&g_ble_navi.chronos);
+#ifdef BLE_NAVI_ERYA
+    erya_on_disconnect(&g_ble_navi.erya);
+#endif
     if (s_chronos_timer)
         rt_timer_stop(s_chronos_timer);
 }
@@ -230,6 +312,17 @@ static int cmd_ble_navi(int argc, char **argv)
                s->frames_ok, s->frames_crc_err, s->resumes, s->aborts);
     rt_kprintf("chunks rx=%u dup=%u bad=%u bytes=%u notify_fail=%u\n",
                s->chunks_rx, s->chunks_dup, s->chunks_bad, s->bytes_rx, b->notify_fail);
+#ifdef BLE_NAVI_ERYA
+    {
+        struct erya *e = &b->erya;
+        rt_kprintf("erya mac=%s phone=%d pics ok=%u lost=%u big=%u alloc_fail=%u pkts=%u "
+                   "last=%uB/%ums navi=%u ey=%u eb=%u bad_magic=%u json_err=%u\n",
+                   e->cfg.mac, e->phone, e->st.pics_ok, e->st.pics_lost, e->st.pics_too_big,
+                   e->st.pics_alloc_fail, e->st.pkts, e->st.last_pic_bytes, e->st.last_pic_ms,
+                   e->st.navi_msgs, e->st.frames_ey, e->st.frames_eb, e->st.bad_magic,
+                   e->st.json_err);
+    }
+#endif
     disp_sink_dump_stats();
     return 0;
 }

@@ -43,6 +43,32 @@ static uint16_t s_conn = BLE_HS_CONN_HANDLE_NONE;
 static uint8_t  s_tx_phy = 1, s_rx_phy = 1;
 static const char *s_name;
 
+#ifdef BLE_NAVI_ERYA
+#ifndef BLE_NAVI_ERYA_SVC_UUID
+#define BLE_NAVI_ERYA_SVC_UUID 0xAAA0
+#endif
+#ifndef BLE_NAVI_ERYA_NAME_PREFIX
+#define BLE_NAVI_ERYA_NAME_PREFIX "EY_"
+#endif
+/* 尔雅: characteristics 0xAAA1..0xAAAA. The document does not say which
+ * property each one has, so all of them allow read, write, write without
+ * response and notify; the app picks what it uses. */
+static const ble_uuid16_t UUID_ERYA_SVC = BLE_UUID16_INIT(BLE_NAVI_ERYA_SVC_UUID);
+static const ble_uuid16_t UUID_ERYA[ERYA_NUM_CHR] = {
+    BLE_UUID16_INIT(0xAAA1), BLE_UUID16_INIT(0xAAA2), BLE_UUID16_INIT(0xAAA3),
+    BLE_UUID16_INIT(0xAAA4), BLE_UUID16_INIT(0xAAA5), BLE_UUID16_INIT(0xAAA6),
+    BLE_UUID16_INIT(0xAAA7), BLE_UUID16_INIT(0xAAA8), BLE_UUID16_INIT(0xAAA9),
+    BLE_UUID16_INIT(0xAAAA),
+};
+static uint16_t s_erya_handle[ERYA_NUM_CHR];
+static char s_erya_name[32];
+#define ERYA_CHR_FLAGS (BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_WRITE | \
+                        BLE_GATT_CHR_F_WRITE_NO_RSP | BLE_GATT_CHR_F_NOTIFY)
+#define ERYA_CHR(i) { .uuid = &UUID_ERYA[i].u, .access_cb = gatt_access, \
+                      .arg = (void *)(uintptr_t)(0xAAA1 + (i)), \
+                      .val_handle = &s_erya_handle[i], .flags = ERYA_CHR_FLAGS }
+#endif
+
 static const ble_uuid128_t UUID_SVC  = BLE_UUID128_INIT(BNP_UUID128(BNP_SVC_UUID16));
 static const ble_uuid128_t UUID_CTRL = BLE_UUID128_INIT(BNP_UUID128(BNP_CTRL_UUID16));
 static const ble_uuid128_t UUID_DATA = BLE_UUID128_INIT(BNP_UUID128(BNP_DATA_UUID16));
@@ -62,9 +88,26 @@ static int om_flat(struct os_mbuf *om, uint8_t *buf, uint16_t cap, uint16_t *len
 
 static int gatt_access(uint16_t conn, uint16_t attr, struct ble_gatt_access_ctxt *ctxt, void *arg)
 {
-    (void)conn; (void)arg;
+    (void)conn;
     static uint8_t buf[520];   /* host thread only -> single instance is safe */
     uint16_t n = 0;
+#ifdef BLE_NAVI_ERYA
+    uint16_t erya_uuid = (uint16_t)(uintptr_t)arg;
+    if (erya_uuid >= 0xAAA1 && erya_uuid <= 0xAAAA) {
+        if (ctxt->op == BLE_GATT_ACCESS_OP_READ_CHR) {
+            n = ble_navi_erya_read(erya_uuid, buf, sizeof(buf));
+            return os_mbuf_append(ctxt->om, buf, n) ? BLE_ATT_ERR_INSUFFICIENT_RES : 0;
+        }
+        if (ctxt->op != BLE_GATT_ACCESS_OP_WRITE_CHR)
+            return BLE_ATT_ERR_UNLIKELY;
+        if (om_flat(ctxt->om, buf, sizeof(buf), &n))
+            return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+        ble_navi_on_erya_write(erya_uuid, buf, n);
+        return 0;
+    }
+#else
+    (void)arg;
+#endif
 
     if (ctxt->op == BLE_GATT_ACCESS_OP_READ_CHR) {
         if (attr == s_stat_handle) {
@@ -116,6 +159,17 @@ static const struct ble_gatt_svc_def s_svcs[] = {
         },
     },
 #endif
+#ifdef BLE_NAVI_ERYA
+    {
+        .type = BLE_GATT_SVC_TYPE_PRIMARY,
+        .uuid = &UUID_ERYA_SVC.u,
+        .characteristics = (struct ble_gatt_chr_def[]) {
+            ERYA_CHR(0), ERYA_CHR(1), ERYA_CHR(2), ERYA_CHR(3), ERYA_CHR(4),
+            ERYA_CHR(5), ERYA_CHR(6), ERYA_CHR(7), ERYA_CHR(8), ERYA_CHR(9),
+            { 0 },
+        },
+    },
+#endif
     { 0 },
 };
 
@@ -131,6 +185,15 @@ static int notify(uint16_t handle, const uint8_t *b, uint16_t n)
 
 int ble_port_notify_ctrl(const uint8_t *b, uint16_t n) { return notify(s_ctrl_handle, b, n); }
 int ble_port_notify_chronos(const uint8_t *b, uint16_t n) { return notify(s_chronos_tx_handle, b, n); }
+int ble_port_notify_erya(uint16_t uuid16, const uint8_t *b, uint16_t n)
+{
+#ifdef BLE_NAVI_ERYA
+    if (uuid16 >= 0xAAA1 && uuid16 <= 0xAAAA)
+        return notify(s_erya_handle[uuid16 - 0xAAA1], b, n);
+#endif
+    (void)uuid16; (void)b; (void)n;
+    return BLE_HS_EINVAL;
+}
 
 int ble_port_request_phy(uint8_t mask)
 {
@@ -223,6 +286,11 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
     case BLE_GAP_EVENT_SUBSCRIBE:
         if (ev->subscribe.attr_handle == s_chronos_tx_handle && ev->subscribe.cur_notify)
             ble_navi_on_chronos_subscribe();
+#ifdef BLE_NAVI_ERYA
+        for (int i = 0; i < ERYA_NUM_CHR; i++)
+            if (ev->subscribe.attr_handle == s_erya_handle[i] && ev->subscribe.cur_notify)
+                ble_navi_on_erya_subscribe(0xAAA1 + i);
+#endif
         break;
     case BLE_GAP_EVENT_ADV_COMPLETE:
         advertise();
@@ -238,14 +306,24 @@ static void advertise(void)
     struct ble_hs_adv_fields f;
     memset(&f, 0, sizeof(f));
     f.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
+    struct ble_hs_adv_fields r;
+    memset(&r, 0, sizeof(r));
+#ifdef BLE_NAVI_ERYA
+    /* adv: flags(3) + uuid16 0xAAA0(4) + "EY_<MAC>"(17) = 24 <= 31
+     * scan rsp: BNP 128-bit service(18). NUS is still served, not advertised. */
+    f.uuids16 = (ble_uuid16_t *)&UUID_ERYA_SVC;
+    f.num_uuids16 = 1;
+    f.uuids16_is_complete = 0;
+    f.name = (const uint8_t *)s_name;
+    f.name_len = strlen(s_name);
+    f.name_is_complete = 1;
+    r.uuids128 = (ble_uuid128_t *)&UUID_SVC;
+    r.num_uuids128 = 1;
+    r.uuids128_is_complete = 0;
+#else
     f.uuids128 = (ble_uuid128_t *)&UUID_SVC;
     f.num_uuids128 = 1;
     f.uuids128_is_complete = 0;
-    int rc = ble_gap_adv_set_fields(&f);
-    if (rc) { rt_kprintf("[nimble] adv fields rc=%d\n", rc); return; }
-
-    struct ble_hs_adv_fields r;
-    memset(&r, 0, sizeof(r));
     r.name = (const uint8_t *)s_name;
     r.name_len = strlen(s_name);
     r.name_is_complete = 1;
@@ -253,6 +331,9 @@ static void advertise(void)
     r.uuids128 = (ble_uuid128_t *)&UUID_NUS;
     r.num_uuids128 = 1;
 #endif
+#endif
+    int rc = ble_gap_adv_set_fields(&f);
+    if (rc) { rt_kprintf("[nimble] adv fields rc=%d\n", rc); return; }
     rc = ble_gap_adv_rsp_set_fields(&r);
     if (rc) rt_kprintf("[nimble] scan rsp rc=%d (name too long?)\n", rc);
 
@@ -272,6 +353,24 @@ static void on_sync(void)
     if (rc == 0)
         rc = ble_hs_id_infer_auto(0, &s_own_addr_type);
     if (rc) { rt_kprintf("[nimble] no identity address rc=%d\n", rc); return; }
+#ifdef BLE_NAVI_ERYA
+    {
+        uint8_t addr[6];
+        char mac[13];
+        if (ble_hs_id_copy_addr(s_own_addr_type == BLE_OWN_ADDR_PUBLIC ? BLE_ADDR_PUBLIC
+                                                                       : BLE_ADDR_RANDOM,
+                                addr, NULL) == 0) {
+            rt_snprintf(mac, sizeof(mac), "%02X%02X%02X%02X%02X%02X",
+                        addr[5], addr[4], addr[3], addr[2], addr[1], addr[0]);
+            ble_navi_erya_set_mac(mac);
+            rt_snprintf(s_erya_name, sizeof(s_erya_name), "%s%s", BLE_NAVI_ERYA_NAME_PREFIX, mac);
+            s_name = s_erya_name;
+            ble_svc_gap_device_name_set(s_name);
+        } else {
+            rt_kprintf("[erya] cannot read BT address, keeping name '%s'\n", s_name);
+        }
+    }
+#endif
     /* default for all future links too */
     ble_gap_set_prefered_default_le_phy(BLE_GAP_LE_PHY_2M_MASK, BLE_GAP_LE_PHY_2M_MASK);
     rt_kprintf("[nimble] synced with controller, advertising as '%s'\n", s_name);

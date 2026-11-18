@@ -9,6 +9,8 @@ chronos_nav.c
 ble_service.c
 disp_sink.c
 ''')
+if GetDepend(['BLE_NAVI_ERYA']):
+    src += ['erya_proto.c', 'erya_json.c']
 if GetDepend(['BLE_NAVI_BACKEND_NIMBLE']):
     src += ['ble_port_nimble.c']
 

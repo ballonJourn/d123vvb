@@ -16,6 +16,9 @@ extern "C" {
 int  disp_sink_init(void);
 /* queue a CRC-checked frame; returns 0 if accepted (ble_navi_release() follows) */
 int  disp_sink_submit(const struct bir_frame *f);
+/* same, but f->data was allocated by the caller (aicos_malloc_align MEM_CMA)
+ * and is freed by the sink after display, also when the queue is full */
+int  disp_sink_submit_owned(const struct bir_frame *f);
 /* navigation text/state (BNP NAV_TEXT or Chronos 0xEF) */
 void disp_sink_nav(const struct nav_state *ns);
 /* chronos 48x48 1bpp icon, all 3 parts received */
