@@ -1,0 +1,16 @@
+Import('RTT_ROOT')
+Import('rtconfig')
+from building import *
+
+cwd = GetCurrentDir()
+src = Split('''
+ble_img_rx.c
+chronos_nav.c
+ble_service.c
+disp_sink.c
+''')
+if GetDepend(['BLE_NAVI_BACKEND_NIMBLE']):
+    src += ['ble_port_nimble.c']
+
+group = DefineGroup('ble_navi', src, depend=['LPKG_USING_BLE_NAVI'], CPPPATH=[cwd])
+Return('group')

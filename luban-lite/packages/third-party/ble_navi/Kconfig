@@ -1,0 +1,71 @@
+menuconfig LPKG_USING_BLE_NAVI
+    bool "BLE Navi: BLE GATT image/navigation receiver (BNP + Chronos compat)"
+    default n
+    depends on !LPKG_USING_BLENAVI
+    select AIC_GE_DRV
+    help
+      D133 as BLE peripheral: receives navigation frames (JPEG/RGB565/1bpp icon)
+      and route text from a phone/PC, shows them via VE+GE.
+      Protocol: firmware/ble_navi/bnp_proto.h
+
+if LPKG_USING_BLE_NAVI
+
+choice
+    prompt "BLE host backend"
+    default BLE_NAVI_BACKEND_NIMBLE
+
+config BLE_NAVI_BACKEND_NIMBLE
+    bool "NimBLE host (vendor local package packages/third-party/nimble) over HCI UART"
+    depends on CONFIG_AIC8800_BT_SUPPORT
+    select LPKG_USING_NIMBLE
+    select LPKG_NIMBLE_ROLE_PERIPHERAL
+    select LPKG_NIMBLE_HOST
+    select LPKG_NIMBLE_HCI_USING_RTT_UART
+    help
+      Uses the ArtInChip NimBLE local package (H4, 1.5 Mbps, HW auto flow
+      control in its rtthread transport) and the AIC8800 driver's aicbt_init
+      (enabled by CONFIG_AIC8800_BT_SUPPORT) which loads the BT patch over SDIO
+      and puts BT on UART. Set UART2 to RS232_AUTO_FLOW_CTRL, 1500000 baud.
+      Keep LPKG_NIMBLE_CTLR off. LPKG_NIMBLE_HCI_H4 and
+      LPKG_NIMBLE_SAMPLE_DISABLE are choice members: Kconfig cannot select
+      them, so they are set in the board defconfig.
+
+endchoice
+
+config BLE_NAVI_DEV_NAME
+    string "Advertised device name"
+    default "D133-Navi"
+
+config BLE_NAVI_PREF_MTU
+    int "Preferred ATT MTU"
+    range 23 517
+    default 247
+
+config BLE_NAVI_CONN_INTERVAL_MS
+    int "Requested connection interval (ms)"
+    range 8 100
+    default 15
+
+config BLE_NAVI_MAX_FRAME_BYTES
+    int "Largest accepted frame (bytes, CMA)"
+    default 1228800
+    help
+      demo88 panel 1024x600 RGB565 = 1228800 (CMA, PSRAM). JPEG frames are
+      typically 30-80 KB: prefer JPEG, raw full screens take 10+ s over BLE.
+
+config BLE_NAVI_CHRONOS_COMPAT
+    bool "Chronos app compatibility (NUS service, nav text + 48x48 icon)"
+    default y
+
+config BLE_NAVI_TURN_X
+    int "Turn icon X"
+    default 16
+config BLE_NAVI_TURN_Y
+    int "Turn icon Y"
+    default 16
+config BLE_NAVI_TURN_SCALE
+    int "Turn icon scale (48px * N)"
+    range 1 4
+    default 2
+
+endif
