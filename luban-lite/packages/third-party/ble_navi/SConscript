@@ -9,10 +9,18 @@ chronos_nav.c
 ble_service.c
 disp_sink.c
 ''')
+path = [cwd]
 if GetDepend(['BLE_NAVI_ERYA']):
     src += ['erya_proto.c', 'erya_json.c']
+    # cJSON: SDK package if enabled, else the copy the application builds
+    if not GetDepend(['LPKG_USING_CJSON']):
+        import os
+        app_json = os.path.join(cwd, '..', '..', '..', 'application', 'rt-thread',
+                                'helloworld', 'third', 'json')
+        if os.path.exists(os.path.join(app_json, 'cJSON.h')):
+            path += [os.path.normpath(app_json)]
 if GetDepend(['BLE_NAVI_BACKEND_NIMBLE']):
     src += ['ble_port_nimble.c']
 
-group = DefineGroup('ble_navi', src, depend=['LPKG_USING_BLE_NAVI'], CPPPATH=[cwd])
+group = DefineGroup('ble_navi', src, depend=['LPKG_USING_BLE_NAVI'], CPPPATH=path)
 Return('group')

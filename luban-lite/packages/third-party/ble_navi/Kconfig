@@ -71,11 +71,13 @@ config BLE_NAVI_TURN_SCALE
 config BLE_NAVI_ERYA
     bool "尔雅 BLE 导航协议 Ver 1.2 (领骑摩托 app: 0xAAA1..0xAAAA, EY/EB frames)"
     default y
-    select LPKG_USING_CJSON
     help
       GATT service with characteristics 0xAAA1..0xAAAA. The device name becomes
       <prefix><BT MAC>, AAA5 carries "<MAC>&<model key>", the app sends JPEG
       pictures on AAA7 and navigation JSON on AAA8.
+      Needs cJSON: the helloworld application already builds one
+      (application/rt-thread/helloworld/third/json). Do not also enable
+      LPKG_USING_CJSON there, both would define the same symbols.
 
 if BLE_NAVI_ERYA
 

@@ -1,6 +1,7 @@
 # Host tests for ble_navi. Needs only gcc. cJSON comes from the SDK tree.
 FW    := ..
-CJSON ?= ../../cJSON-1.7.16
+# the cJSON the firmware links (helloworld app); SDK copy: make CJSON=../../cJSON-1.7.16
+CJSON ?= ../../../../application/rt-thread/helloworld/third/json
 CFLAGS := -O1 -g -Wall -Wextra -Werror -std=c99 -D_POSIX_C_SOURCE=199309L \
           -fsanitize=address,undefined -fno-sanitize-recover=all -I$(FW) -I$(CJSON) -Ishim
 
