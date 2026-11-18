@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>D133 蓝牙导航画面发送</title>
+<style>
+:root {
+  --paper: #EEF1EC;      /* map paper */
+  --panel: #FFFFFF;
+  --ink: #1F2A30;
+  --muted: #5E6B72;
+  --line: #CDD5D1;
+  --route: #2D6CDF;      /* nav route blue */
+  --route-soft: #A9C3F2;
+  --ok: #2F8F5B;
+  --retx: #D89A00;
+  --miss: #C8423A;
+  --idle: #DCE2DF;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #182025; --panel: #202A30; --ink: #E4EAE7; --muted: #9AA7A1; --line: #34424A;
+    --route: #6C9BF0; --route-soft: #35507F; --ok: #4DB37C; --retx: #E7B33A; --miss: #E06A60;
+    --idle: #2E3A40; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #182025; --panel: #202A30; --ink: #E4EAE7; --muted: #9AA7A1; --line: #34424A;
+  --route: #6C9BF0; --route-soft: #35507F; --ok: #4DB37C; --retx: #E7B33A; --miss: #E06A60;
+  --idle: #2E3A40; color-scheme: dark;
+}
+:root { box-sizing: border-box; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+*, *::before, *::after { box-sizing: inherit; }
+html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+body {
+  margin: 0; background: var(--paper); color: var(--ink);
+  font: 15px/1.55 "PingFang SC", "Microsoft YaHei", "Noto Sans SC", "Source Han Sans SC", system-ui, sans-serif;
+}
+.wrap { max-width: 1240px; margin: 0 auto; padding: 18px 20px 40px; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px 20px; margin-bottom: 16px; }
+h1 { font-size: 22px; font-weight: 600; margin: 0; letter-spacing: .02em; }
+#linkState { color: var(--muted); }
+#linkState.on { color: var(--ok); }
+.grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 16px; }
+@media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+h2 { font-size: 15px; font-weight: 600; margin: 0 0 10px; }
+.preview { width: 100%; aspect-ratio: 1024 / 600; display: block; border-radius: 6px; background: var(--idle); }
+.row { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; margin-top: 10px; }
+label { color: var(--muted); font-size: 14px; display: inline-flex; gap: 6px; align-items: center; }
+input[type=text], input[type=number], select {
+  font: inherit; color: var(--ink); background: var(--paper); border: 1px solid var(--line);
+  border-radius: 6px; padding: 4px 8px; min-width: 0;
+}
+input[type=text] { width: 10em; }
+input[type=number] { width: 5em; }
+button {
+  font: inherit; border: 1px solid var(--route); background: transparent; color: var(--route);
+  border-radius: 6px; padding: 5px 12px; cursor: pointer;
+}
+button.primary { background: var(--route); color: #fff; }
+button:disabled { opacity: .4; cursor: default; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--route); outline-offset: 2px; }
+dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 0; }
+dt { color: var(--muted); }
+dd { margin: 0; font-variant-numeric: tabular-nums; }
+.big { font-size: 30px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.big small { font-size: 14px; font-weight: 400; color: var(--muted); }
+.bar { height: 8px; background: var(--idle); border-radius: 4px; overflow: hidden; margin: 8px 0 12px; }
+.bar > i { display: block; height: 100%; width: 0; background: var(--route); transition: width .15s; }
+#map { width: 100%; height: 220px; display: block; }
+#spark { width: 100%; height: 70px; display: block; margin-top: 6px; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 13px; color: var(--muted); margin-top: 8px; }
+.legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; background: var(--c); vertical-align: -1px; }
+.full { grid-column: 1 / -1; }
+#log { width: 100%; height: 150px; font: 12.5px/1.5 ui-monospace, Consolas, monospace; color: var(--ink);
+       background: var(--paper); border: 1px solid var(--line); border-radius: 6px; padding: 8px; resize: vertical; }
+#warn { display: none; border-color: var(--miss); color: var(--miss); margin-bottom: 16px; }
+@media (prefers-reduced-motion: reduce) { .bar > i { transition: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>D133 蓝牙导航画面发送</h1>
+    <span id="linkState">未连接</span>
+    <span style="flex:1"></span>
+    <button id="btnConnect" class="primary">连接开发板</button>
+    <button id="btnReconnect" disabled>重新连接</button>
+  </header>
+
+  <section id="warn"></section>
+
+  <div class="grid">
+    <section>
+      <h2>要发送的画面</h2>
+      <canvas id="preview" class="preview" width="1024" height="600"></canvas>
+      <div class="row">
+        <label>路名 <input id="road" type="text" value="中山北路"></label>
+        <label>距离 <input id="dist" type="text" value="300 米" style="width:6em"></label>
+        <label>转向 <select id="turn"><option value="1">左转</option><option value="2" selected>右转</option><option value="0">直行</option></select></label>
+      </div>
+      <div class="row">
+        <label>来源 <select id="source"><option value="nav">测试导航画面</option><option value="file">图片文件</option></select></label>
+        <input id="file" type="file" accept="image/*" hidden>
+        <label>格式 <select id="fmt"><option value="1">JPEG</option><option value="0">RGB565 原始</option></select></label>
+        <label id="qWrap">质量 <input id="quality" type="number" min="30" max="95" value="75"></label>
+        <span id="frameSize" style="color:var(--muted)"></span>
+      </div>
+      <div class="row">
+        <button id="btnSend" class="primary" disabled>发送一帧</button>
+        <button id="btnLoop" disabled>连续发送</button>
+        <button id="btnStop" disabled>停止</button>
+        <button id="btnResume" disabled>续传上一帧</button>
+        <label>每 <input id="barrier" type="number" min="1" max="200" value="16"> 块确认一次</label>
+      </div>
+    </section>
+
+    <section>
+      <h2>链路</h2>
+      <dl>
+        <dt>ATT MTU</dt><dd id="pMtu">—</dd>
+        <dt>每块数据</dt><dd id="pChunk">—</dd>
+        <dt>PHY</dt><dd id="pPhy">—</dd>
+        <dt>连接间隔</dt><dd id="pCi">—</dd>
+        <dt>DLE</dt><dd id="pDle">—</dd>
+      </dl>
+      <div class="row"><button id="btnParams" disabled>刷新链路参数</button><button id="btnPhy" disabled>请求 2M PHY</button><button id="btnNav" disabled>只发路名</button></div>
+
+      <h2 style="margin-top:16px">当前帧</h2>
+      <div class="big" id="kbps">0<small> kB/s 发送</small></div>
+      <div class="bar"><i id="prog"></i></div>
+      <dl>
+        <dt>进度</dt><dd id="sProg">—</dd>
+        <dt>有效吞吐</dt><dd id="sGood">—</dd>
+        <dt>重传</dt><dd id="sRetx">—</dd>
+        <dt>CRC 失败</dt><dd id="sCrc">—</dd>
+        <dt>设备侧重复 / 坏块</dt><dd id="sDup">—</dd>
+        <dt>已显示帧</dt><dd id="sFrames">0</dd>
+      </dl>
+    </section>
+
+    <section class="full">
+      <h2>分块状态</h2>
+      <canvas id="map"></canvas>
+      <div class="legend">
+        <span style="--c:var(--idle)">未发送</span>
+        <span style="--c:var(--route-soft)">已发出</span>
+        <span style="--c:var(--ok)">设备已确认</span>
+        <span style="--c:var(--miss)">设备报告缺失</span>
+        <span style="--c:var(--retx)">重传过</span>
+      </div>
+      <canvas id="spark"></canvas>
+    </section>
+
+    <section class="full">
+      <h2>日志</h2>
+      <textarea id="log" readonly></textarea>
+    </section>
+  </div>
+</div>
+
+<script src="bnp-core.js"></script>
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const log = (m) => { const t = new Date().toTimeString().slice(0, 8); $('log').value += `${t}  ${m}\n`; $('log').scrollTop = 1e9; };
+
+/* ---------------- frame source ---------------- */
+const pv = $('preview'), pctx = pv.getContext('2d');
+let fileImg = null, frameNo = 0;
+
+function drawNav() {
+  const W = 1024, H = 600, g = pctx;
+  g.fillStyle = '#E8ECE4'; g.fillRect(0, 0, W, H);
+  g.fillStyle = '#D3E3C9'; g.fillRect(620, 40, 300, 180); g.fillRect(80, 380, 260, 170);
+  g.strokeStyle = '#FFFFFF'; g.lineCap = 'round';
+  g.lineWidth = 34; g.beginPath(); g.moveTo(0, 330); g.lineTo(W, 300); g.stroke();
+  g.beginPath(); g.moveTo(520, H); g.lineTo(560, 0); g.stroke();
+  g.lineWidth = 18; g.beginPath(); g.moveTo(0, 120); g.lineTo(W, 160); g.stroke();
+  const turn = +$('turn').value;
+  g.strokeStyle = '#2D6CDF'; g.lineWidth = 16; g.beginPath(); g.moveTo(525, H);
+  g.lineTo(543, 318);
+  if (turn === 2) g.lineTo(W, 300); else if (turn === 1) g.lineTo(0, 330); else g.lineTo(560, 0);
+  g.stroke();
+  g.fillStyle = '#FF6B3D'; g.beginPath(); g.arc(530, 520, 14, 0, 7); g.fill();
+  g.fillStyle = '#1F5BC7'; g.fillRect(0, 0, 360, 150);
+  g.save(); g.translate(80, 75); g.strokeStyle = '#fff'; g.lineWidth = 12; g.lineJoin = 'round';
+  g.beginPath(); g.moveTo(0, 45); g.lineTo(0, -5);
+  if (turn === 2) { g.lineTo(40, -5); g.stroke(); g.beginPath(); g.moveTo(30, -25); g.lineTo(52, -5); g.lineTo(30, 15); }
+  else if (turn === 1) { g.lineTo(-40, -5); g.stroke(); g.beginPath(); g.moveTo(-30, -25); g.lineTo(-52, -5); g.lineTo(-30, 15); }
+  else { g.lineTo(0, -40); g.stroke(); g.beginPath(); g.moveTo(-20, -25); g.lineTo(0, -48); g.lineTo(20, -25); }
+  g.stroke(); g.restore();
+  g.fillStyle = '#fff'; g.font = '600 40px "PingFang SC","Microsoft YaHei",sans-serif';
+  g.fillText($('dist').value, 150, 70);
+  g.font = '28px "PingFang SC","Microsoft YaHei",sans-serif'; g.fillText($('road').value, 150, 118);
+  g.fillStyle = 'rgba(31,42,48,.75)'; g.fillRect(W - 250, H - 54, 236, 40);
+  g.fillStyle = '#fff'; g.font = '20px ui-monospace,Consolas,monospace';
+  g.fillText(`#${String(frameNo).padStart(5, '0')} ${new Date().toTimeString().slice(0, 8)}`, W - 238, H - 27);
+}
+
+function drawFile() {
+  const W = 1024, H = 600;
+  pctx.fillStyle = '#000'; pctx.fillRect(0, 0, W, H);
+  if (!fileImg) return;
+  const s = Math.min(W / fileImg.width, H / fileImg.height);
+  const w = fileImg.width * s, h = fileImg.height * s;
+  pctx.drawImage(fileImg, (W - w) / 2, (H - h) / 2, w, h);
+}
+
+function render() { $('source').value === 'nav' ? drawNav() : drawFile(); }
+
+async function buildFrame() {
+  frameNo++; render();
+  const fmt = +$('fmt').value;
+  let data;
+  if (fmt === BNP.FMT.JPEG) {
+    const q = Math.min(95, Math.max(30, +$('quality').value)) / 100;
+    const blob = await new Promise((r) => pv.toBlob(r, 'image/jpeg', q));
+    data = new Uint8Array(await blob.arrayBuffer());
+  } else {
+    data = BNP.rgba8888ToRgb565(pctx.getImageData(0, 0, 1024, 600).data);
+  }
+  $('frameSize').textContent = `${(data.length / 1024).toFixed(1)} KB`;
+  return { fmt, layer: BNP.LAYER.MAP, width: 1024, height: 600, x: 0, y: 0, data };
+}
+
+/* ---------------- chunk map + throughput ---------------- */
+const map = $('map'), mctx = map.getContext('2d'), spark = $('spark'), sctx = spark.getContext('2d');
+let cells = new Uint8Array(0), maxSent = -1, dirty = false;
+const COLORS = () => [css('--idle'), css('--route-soft'), css('--ok'), css('--miss'), css('--retx')];
+
+function sizeCanvas(c) { const r = c.getBoundingClientRect(), d = devicePixelRatio || 1; c.width = r.width * d; c.height = r.height * d; }
+function drawMap() {
+  dirty = false; sizeCanvas(map);
+  const n = cells.length, W = map.width, H = map.height, col = COLORS();
+  mctx.clearRect(0, 0, W, H);
+  if (!n) return;
+  const cols = Math.ceil(Math.sqrt(n * W / H)), rows = Math.ceil(n / cols);
+  const cw = W / cols, ch = H / rows, gap = cw > 5 && ch > 5 ? 1 : 0;
+  for (let i = 0; i < n; i++) {
+    mctx.fillStyle = col[cells[i]];
+    mctx.fillRect((i % cols) * cw, Math.floor(i / cols) * ch, Math.max(1, cw - gap), Math.max(1, ch - gap));
+  }
+}
+const markDirty = () => { if (!dirty) { dirty = true; requestAnimationFrame(drawMap); } };
+
+let txBytes = 0, samples = [];
+setInterval(() => {
+  const kbps = txBytes / 1024 / 0.5; txBytes = 0;
+  samples.push(kbps); if (samples.length > 160) samples.shift();
+  $('kbps').firstChild.nodeValue = kbps.toFixed(1);
+  sizeCanvas(spark);
+  const W = spark.width, H = spark.height, max = Math.max(10, ...samples);
+  sctx.clearRect(0, 0, W, H); sctx.strokeStyle = css('--route'); sctx.lineWidth = 2 * (devicePixelRatio || 1);
+  sctx.beginPath();
+  samples.forEach((v, i) => { const x = W - (samples.length - 1 - i) * (W / 159), y = H - 4 - (v / max) * (H - 8); i ? sctx.lineTo(x, y) : sctx.moveTo(x, y); });
+  sctx.stroke();
+  sctx.fillStyle = css('--muted'); sctx.font = `${12 * (devicePixelRatio || 1)}px sans-serif`;
+  sctx.fillText(`峰值 ${max.toFixed(0)} kB/s`, 6, 14 * (devicePixelRatio || 1));
+}, 500);
+
+/* ---------------- BLE ---------------- */
+let device = null, ctrl = null, dataCh = null, sender = null, busy = false, looping = false;
+let lastFrame = null, framesShown = 0, cur = null;
+
+function onEvent(ev, d) {
+  if (ev === 'tx') {
+    txBytes += d.bytes; cells[d.seq] = d.retx ? 4 : 1; if (d.seq > maxSent) maxSent = d.seq;
+    if (cur) { cur.sent++; if (d.retx) cur.retx++; }
+    markDirty();
+  } else if (ev === 'start') {
+    cells = new Uint8Array(d.n); maxSent = -1;
+    cur = { n: d.n, sent: 0, retx: 0, have: d.have };
+    $('pChunk').textContent = `${d.chunk} 字节 × ${d.n} 块`;
+    if (d.resumed) log(`设备保留了 ${d.have} 块，从断点继续`);
+    markDirty();
+  } else if (ev === 'status') {
+    if (!cells.length || !cur) return;
+    const miss = new Set();
+    for (const [f, c] of d.ranges) for (let s = f; s < f + c; s++) miss.add(s);
+    for (let s = 0; s <= maxSent && s < cells.length; s++) {
+      if (s < d.contig || !miss.has(s)) { if (cells[s] !== 4) cells[s] = 2; }
+      else if (cells[s] === 1 || cells[s] === 4) cells[s] = 3;
+    }
+    $('prog').style.width = (100 * d.have / d.n) + '%';
+    $('sProg').textContent = `${d.have} / ${d.n} 块`;
+    $('sDup').textContent = `${d.dup} / ${d.bad}`;
+    markDirty();
+  } else if (ev === 'result') {
+    if (d.err === 0) {
+      for (let i = 0; i < cells.length; i++) if (cells[i] !== 4) cells[i] = 2;
+      $('prog').style.width = '100%'; $('sProg').textContent = `${cells.length} / ${cells.length} 块`;
+    }
+    else for (const [f, c] of d.ranges) for (let s = f; s < f + c && s < cells.length; s++) cells[s] = 3;
+    if (d.err === 5) log(`设备报告缺 ${d.ranges.reduce((a, r) => a + r[1], 0)} 块（${d.ranges.length} 段），补发`);
+    if (d.err === 6) log('整帧 CRC 不符（串口误码？），设备已清空，整帧重发');
+    markDirty();
+  } else if (ev === 'params') {
+    showParams(d);
+  } else if (ev === 'log') log(d);
+}
+
+function showParams(p) {
+  const phy = (v) => ({ 1: '1M', 2: '2M', 3: 'Coded' }[v] || v);
+  $('pMtu').textContent = p.mtu + (p.mtu === 247 ? '' : p.mtu > 247 ? '（大于 247 会多拆一个 LL 包）' : '');
+  $('pPhy').textContent = `发 ${phy(p.txPhy)} / 收 ${phy(p.rxPhy)}`;
+  $('pCi').textContent = `${p.ciMs} ms，延迟 ${p.latency}，超时 ${p.timeoutMs} ms`;
+  $('pDle').textContent = `发 ${p.dleTx} / 收 ${p.dleRx} 字节`;
+}
+
+function setConnected(on) {
+  $('linkState').textContent = on ? `已连接 ${device.name || ''}` : (device ? '连接已断开' : '未连接');
+  $('linkState').classList.toggle('on', on);
+  for (const id of ['btnSend', 'btnLoop', 'btnParams', 'btnPhy', 'btnNav']) $(id).disabled = !on || busy;
+  $('btnResume').disabled = !on || busy || !lastFrame || lastFrame.done;
+  $('btnReconnect').disabled = on || !device;
+}
+
+async function attachGatt() {
+  log('正在连接 GATT…');
+  const server = await device.gatt.connect();
+  const svc = await server.getPrimaryService(BNP.UUID.SVC);
+  ctrl = await svc.getCharacteristic(BNP.UUID.CTRL);
+  dataCh = await svc.getCharacteristic(BNP.UUID.DATA);
+  sender = new BNP.Sender({
+    writeCtrl: (b) => ctrl.writeValueWithResponse(b),
+    writeData: (b) => dataCh.writeValueWithoutResponse(b),
+  }, { on: onEvent, barrier: +$('barrier').value });
+  await ctrl.startNotifications();
+  ctrl.addEventListener('characteristicvaluechanged', (e) => {
+    const v = e.target.value; sender.handleNotify(new Uint8Array(v.buffer, v.byteOffset, v.byteLength));
+  });
+  setConnected(true);
+  log('已连接。链路参数要等板子完成 MTU / PHY 协商，稍后自动读取');
+  setTimeout(() => sender && sender.getParams().catch((e) => log('读取链路参数失败：' + e.message)), 1200);
+}
+
+$('btnConnect').onclick = async () => {
+  try {
+    device = await navigator.bluetooth.requestDevice({
+      filters: [{ namePrefix: 'D133' }, { services: [BNP.UUID.SVC] }],
+      optionalServices: [BNP.UUID.SVC],
+    });
+    device.addEventListener('gattserverdisconnected', () => {
+      looping = false; if (sender) sender.linkLost(); setConnected(false);
+      log('连接断开。板子保留了未完成的帧，重新连接后可以续传');
+    });
+    await attachGatt();
+  } catch (e) { log('连接失败：' + e.message); }
+};
+$('btnReconnect').onclick = () => attachGatt().catch((e) => log('重新连接失败：' + e.message));
+
+async function sendOne(resume) {
+  busy = true; setConnected(true); $('btnStop').disabled = false;
+  sender.barrier = Math.max(1, +$('barrier').value);
+  try {
+    const f = resume ? lastFrame : await buildFrame();
+    lastFrame = f; f.done = false;
+    if (!resume) await sender.sendNav([[BNP.NAV.ROAD, $('road').value], [BNP.NAV.DIST, $('dist').value], [BNP.NAV.TURN, +$('turn').value]]);
+    const st = await sender.sendFrame(f, { resume });
+    f.done = true; framesShown++;
+    const good = st.bytes / 1024 / (st.rxMs / 1000);
+    $('sGood').textContent = `${good.toFixed(1)} kB/s（板子收齐 ${(st.bytes / 1024).toFixed(1)} KB 用了 ${st.rxMs} ms）`;
+    $('sRetx').textContent = `${st.retx} 块，${st.nacks} 轮补发`;
+    $('sCrc').textContent = String(st.crcErr);
+    $('sFrames').textContent = String(framesShown);
+    log(`第 ${st.id} 帧已显示：${st.n} 块，发送 ${st.sent} 次，重传 ${st.retx}，${st.ms} ms`);
+    return true;
+  } catch (e) {
+    log('发送中断：' + e.message + (lastFrame && !lastFrame.done ? '（可点“续传上一帧”）' : ''));
+    return false;
+  } finally {
+    busy = false; $('btnStop').disabled = !looping;
+    setConnected(!!(device && device.gatt.connected));
+  }
+}
+
+$('btnSend').onclick = () => sendOne(false);
+$('btnResume').onclick = () => sendOne(true);
+$('btnLoop').onclick = async () => {
+  looping = true; $('btnStop').disabled = false;
+  const t0 = performance.now(); let n = 0;
+  while (looping && device.gatt.connected) {
+    if (!(await sendOne(false))) break;
+    n++; log(`连续发送：${n} 帧，平均 ${(n / ((performance.now() - t0) / 1000)).toFixed(2)} 帧/秒`);
+  }
+  looping = false; $('btnStop').disabled = true;
+};
+$('btnStop').onclick = () => { looping = false; if (sender && lastFrame) sender.abort(lastFrame.id); };
+$('btnParams').onclick = () => sender.getParams().catch((e) => log('读取链路参数失败：' + e.message));
+$('btnPhy').onclick = () => ctrl.writeValueWithResponse(Uint8Array.of(BNP.OP.REQ_PHY, 2))
+  .then(() => setTimeout(() => $('btnParams').onclick(), 800)).catch((e) => log(e.message));
+$('btnNav').onclick = () => sender.sendNav([[BNP.NAV.ROAD, $('road').value], [BNP.NAV.DIST, $('dist').value],
+  [BNP.NAV.TURN, +$('turn').value]]).then(() => log('路名已发送')).catch((e) => log(e.message));
+
+$('source').onchange = () => { if ($('source').value === 'file') $('file').click(); render(); };
+$('file').onchange = () => {
+  const f = $('file').files[0]; if (!f) return;
+  const img = new Image(); img.onload = () => { fileImg = img; render(); }; img.src = URL.createObjectURL(f);
+};
+$('fmt').onchange = () => { $('qWrap').style.visibility = $('fmt').value === '1' ? 'visible' : 'hidden'; };
+for (const id of ['road', 'dist', 'turn']) $(id).oninput = render;
+addEventListener('resize', markDirty);
+
+if (!navigator.bluetooth) {
+  $('warn').style.display = 'block';
+  $('warn').textContent = '这个浏览器用不了 Web Bluetooth。请用桌面版 Chrome 或 Edge，或者安卓版 Chrome，并通过 http://localhost 或 https 打开本页（例如在本目录运行 python3 -m http.server 8000）。';
+  $('btnConnect').disabled = true;
+}
+render(); drawMap();
+</script>
+</body>
+</html>

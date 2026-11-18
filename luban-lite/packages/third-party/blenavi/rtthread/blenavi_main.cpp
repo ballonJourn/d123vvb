@@ -75,6 +75,11 @@ static int blenavi_start()
     s_watch->setConfigurationCallback(on_config);
     s_watch->begin();                         /* NimBLEDevice::init, NUS service, advertising */
 
+    /* ATT MTU 247 = DLE 251 - 4 (L2CAP): one write fills exactly one LL PDU.
+     * The vendor NimBLE default (BLE_ATT_PREFERRED_MTU 256) gives 257-byte
+     * L2CAP frames, i.e. a full PDU plus a 6-byte one for every chunk. */
+    NimBLEDevice::setMTU(247);
+
     bnp_service_attach(NimBLEDevice::getServer());
     NimBLEDevice::startAdvertising();         /* re-advertise with the BNP UUID added */
 
