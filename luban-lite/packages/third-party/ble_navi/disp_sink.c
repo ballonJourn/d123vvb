@@ -35,8 +35,10 @@ struct disp_msg {
 };
 
 static rt_mq_t       s_mq;
+#ifndef BLE_NAVI_DISP_LVGL
 static struct mpp_fb *s_fb;
 static struct mpp_ge *s_ge;
+#endif
 static struct aicfb_screeninfo s_info;
 static struct {
     uint32_t frames, jpeg, rgb, icon, drops, errors;
@@ -45,6 +47,7 @@ static struct {
 
 static uint32_t now_ms(void) { return rt_tick_get() * 1000 / RT_TICK_PER_SECOND; }
 
+#ifndef BLE_NAVI_DISP_LVGL
 /* current visible UI buffer; with AIC_PAN_DISPLAY we draw into the shown one
  * (no page flip) - acceptable for nav updates, see README "tearing" */
 static int ui_dst(struct mpp_buf *dst)
@@ -105,6 +108,8 @@ static int show_raw(const struct bir_frame *f, enum mpp_pixel_format fmt, uint32
     return blit(&src, f->x, f->y, f->width, f->height);
 }
 
+#endif /* !BLE_NAVI_DISP_LVGL */
+
 /*
  * VE output format for JPEG. D13x GE cannot bitblt from YUV ("bitblt not
  * support yuv format, except src format yuv400"), so let the VE convert:
@@ -129,7 +134,10 @@ static enum mpp_pixel_format jpeg_out_fmt(void)
 #endif
 }
 
-static int show_jpeg(const struct bir_frame *f)
+/* decode a JPEG with the VE, hand the decoded frame to use(), release it */
+typedef int (*frame_use_fn)(struct mpp_buf *fb, const struct bir_frame *f);
+
+static int jpeg_decode(const struct bir_frame *f, frame_use_fn use)
 {
     if (f->len < 4 || f->data[0] != 0xFF || f->data[1] != 0xD8) {
         rt_kprintf("[disp] not a JPEG (no FFD8), %u bytes\n", f->len);
@@ -176,21 +184,29 @@ static int show_jpeg(const struct bir_frame *f)
         goto out;
     }
     s_st.last_decode_ms = now_ms() - t;
-    /* width/height in START = target size on screen (0 = native) */
-    ret = blit(&fr.buf, f->x, f->y, f->width, f->height);
+    ret = use(&fr.buf, f);
 #ifdef BLE_NAVI_ERYA_LOG
-    rt_kprintf("[disp] JPEG %ux%u fmt %d -> (%u,%u) decode %u ms, blit %u ms%s\n",
+    rt_kprintf("[disp] JPEG %ux%u fmt %d -> (%u,%u) decode %u ms, show %u ms%s\n",
                fr.buf.size.width, fr.buf.size.height, fr.buf.format, f->x, f->y,
-               s_st.last_decode_ms, s_st.last_blit_ms, ret ? " BLIT FAILED" : "");
+               s_st.last_decode_ms, s_st.last_blit_ms, ret ? " SHOW FAILED" : "");
 #else
     if (ret)
-        rt_kprintf("[disp] bitblt failed (src fmt %d)\n", fr.buf.format);
+        rt_kprintf("[disp] showing the decoded frame failed (fmt %d)\n", fr.buf.format);
 #endif
     mpp_decoder_put_frame(dec, &fr);
 out:
     mpp_decoder_destory(dec);
     return ret;
 }
+
+#ifndef BLE_NAVI_DISP_LVGL
+/* width/height in the frame = target size on screen (0 = native) */
+static int blit_use(struct mpp_buf *fb, const struct bir_frame *f)
+{
+    return blit(fb, f->x, f->y, f->width, f->height);
+}
+static int show_jpeg(const struct bir_frame *f) { return jpeg_decode(f, blit_use); }
+#endif
 
 /* MSB-first 1bpp -> RGB565 (white on black), nearest-neighbour scale */
 static uint8_t *expand_1bpp(const uint8_t *bits, uint16_t w, uint16_t h, int sc, uint32_t *out_len)
@@ -208,6 +224,7 @@ static uint8_t *expand_1bpp(const uint8_t *bits, uint16_t w, uint16_t h, int sc,
     return (uint8_t *)px;
 }
 
+#ifndef BLE_NAVI_DISP_LVGL
 static void handle(struct disp_msg *m)
 {
     struct bir_frame *f = &m->f;
@@ -267,6 +284,183 @@ int disp_sink_init(void)
         return -1;
     return rt_thread_startup(t);
 }
+
+#else /* BLE_NAVI_DISP_LVGL */
+/*
+ * LVGL mode: the application's LVGL (v9, LV_OS_NONE) owns the framebuffer and
+ * also uses the VE for its own images, and all LVGL calls must come from the
+ * LVGL thread. So frames are queued here and consumed by an lv_timer created
+ * in ble_navi_lv_attach() (called from lv_user_gui_init in the LVGL thread):
+ * the VE decodes JPEG -> RGB565 in that thread (no VE contention with
+ * lv_mpp_dec), and the result is an lv_image on lv_layer_top() (LVGL composes
+ * it; nothing redraws over it).
+ */
+#include "lvgl.h"
+
+#define LV_POLL_MS        30
+#define LV_FRAMES_PER_TICK 1        /* keep the LVGL thread responsive */
+
+struct lv_layer_img {
+    lv_obj_t      *img;
+    lv_image_dsc_t dsc[2];         /* alternate: LVGL caches by src pointer */
+    uint8_t       *buf[2];
+    uint32_t       cap[2];
+    int            cur;
+};
+static struct lv_layer_img s_lv[BIR_NUM_LAYERS];
+static int s_lv_attached;
+
+static uint8_t *lv_next_buf(struct lv_layer_img *L, uint32_t need, int *idx)
+{
+    int i = L->cur ^ 1;
+    if (L->cap[i] < need) {
+        if (L->buf[i])
+            aicos_free_align(MEM_CMA, L->buf[i]);
+        L->buf[i] = aicos_malloc_align(MEM_CMA, need, CACHE_LINE_SIZE);
+        L->cap[i] = L->buf[i] ? need : 0;
+    }
+    *idx = i;
+    return L->buf[i];
+}
+
+/* copy RGB565 rows into the layer's spare buffer and show it */
+static int lv_show_rgb565(const uint8_t *px, uint32_t src_stride, uint16_t w, uint16_t h,
+                          const struct bir_frame *f)
+{
+    uint8_t layer = f->layer < BIR_NUM_LAYERS ? f->layer : 0;
+    struct lv_layer_img *L = &s_lv[layer];
+    uint32_t t = now_ms(), stride = (uint32_t)w * 2, need = stride * h;
+    int i;
+    uint8_t *dst = lv_next_buf(L, need, &i);
+    if (!dst) {
+        rt_kprintf("[disp] no CMA for %ux%u picture\n", w, h);
+        return -1;
+    }
+    for (uint32_t y = 0; y < h; y++)
+        memcpy(dst + y * stride, px + y * src_stride, stride);
+    aicos_dcache_clean_range(dst, need);           /* LVGL may draw it with GE */
+
+    lv_image_dsc_t *d = &L->dsc[i];
+    memset(d, 0, sizeof(*d));
+    d->header.magic = LV_IMAGE_HEADER_MAGIC;
+    d->header.cf = LV_COLOR_FORMAT_RGB565;
+    d->header.w = w;
+    d->header.h = h;
+    d->header.stride = stride;
+    d->data_size = need;
+    d->data = dst;
+
+    if (!L->img) {
+        L->img = lv_image_create(lv_layer_top());
+        lv_obj_remove_flag(L->img, LV_OBJ_FLAG_CLICKABLE);
+    }
+    lv_image_cache_drop(d);
+    lv_image_set_src(L->img, d);
+    lv_obj_set_pos(L->img, f->x, f->y);
+    if (f->width && f->height && (f->width != w || f->height != h)) {
+        lv_obj_set_size(L->img, f->width, f->height);
+        lv_image_set_inner_align(L->img, LV_IMAGE_ALIGN_STRETCH);
+    } else {
+        lv_obj_set_size(L->img, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    }
+    lv_obj_remove_flag(L->img, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(L->img);
+    L->cur = i;
+    s_st.last_blit_ms = now_ms() - t;
+    return 0;
+}
+
+static int lv_use_decoded(struct mpp_buf *fb, const struct bir_frame *f)
+{
+    if (fb->format != MPP_FMT_RGB_565) {
+        rt_kprintf("[disp] decoded fmt %d, LVGL mode expects RGB565\n", fb->format);
+        return -1;
+    }
+    uint16_t w = fb->crop_en ? fb->crop.width : fb->size.width;
+    uint16_t h = fb->crop_en ? fb->crop.height : fb->size.height;
+    const uint8_t *px = (const uint8_t *)(uintptr_t)fb->phy_addr[0];   /* D133: VA == PA */
+    aicos_dcache_invalid_range((void *)px, fb->stride[0] * h);          /* VE wrote it */
+    return lv_show_rgb565(px, fb->stride[0], w, h, f);
+}
+
+static void handle(struct disp_msg *m)
+{
+    struct bir_frame *f = &m->f;
+    int ret = -1;
+    s_st.frames++;
+    switch (f->fmt) {
+    case BNP_FMT_JPEG:
+        s_st.jpeg++;
+        ret = jpeg_decode(f, lv_use_decoded);
+        break;
+    case BNP_FMT_RGB565:
+        s_st.rgb++;
+        ret = lv_show_rgb565(f->data, (uint32_t)f->width * 2, f->width, f->height, f);
+        break;
+    case BNP_FMT_ICON1BPP: {
+        s_st.icon++;
+        uint32_t len;
+        uint8_t *px = expand_1bpp(f->data, f->width, f->height, BLE_NAVI_TURN_SCALE, &len);
+        if (px) {
+            uint16_t W = f->width * BLE_NAVI_TURN_SCALE, H = f->height * BLE_NAVI_TURN_SCALE;
+            struct bir_frame g = *f;
+            g.width = g.height = 0;                        /* already scaled */
+            ret = lv_show_rgb565(px, (uint32_t)W * 2, W, H, &g);
+            aicos_free_align(MEM_CMA, px);
+        }
+        break;
+    }
+    default:
+        rt_kprintf("[disp] fmt %u not supported in LVGL mode\n", f->fmt);
+        break;
+    }
+    if (ret)
+        s_st.errors++;
+    if (m->own_buf)
+        aicos_free_align(MEM_CMA, f->data);
+    else
+        ble_navi_release(f->layer);
+}
+
+static void lv_poll(lv_timer_t *t)
+{
+    (void)t;
+    struct disp_msg m;
+    for (int n = 0; n < LV_FRAMES_PER_TICK; n++) {
+        if (!s_mq || rt_mq_recv(s_mq, &m, sizeof(m), 0) < 0)
+            break;
+        handle(&m);
+    }
+}
+
+/* call once from the LVGL thread, e.g. at the end of lv_user_gui_init() */
+void ble_navi_lv_attach(void)
+{
+    if (s_lv_attached)
+        return;
+    if (!s_mq)
+        s_mq = rt_mq_create("disp", sizeof(struct disp_msg), DISP_QUEUE_DEPTH, RT_IPC_FLAG_FIFO);
+    lv_timer_create(lv_poll, LV_POLL_MS, NULL);
+    s_lv_attached = 1;
+    rt_kprintf("[disp] LVGL top layer attached\n");
+}
+
+int disp_sink_init(void)
+{
+#if LV_COLOR_DEPTH == 16
+    s_info.format = MPP_FMT_RGB_565;               /* VE output = LVGL RGB565 */
+#else
+#error "BLE_NAVI_DISP_LVGL: only LV_COLOR_DEPTH 16 is implemented"
+#endif
+    if (!s_mq)
+        s_mq = rt_mq_create("disp", sizeof(struct disp_msg), DISP_QUEUE_DEPTH, RT_IPC_FLAG_FIFO);
+    if (!s_mq)
+        return -1;
+    rt_kprintf("[disp] LVGL mode: pictures on lv_layer_top()%s\n",
+               s_lv_attached ? "" : " - waiting for ble_navi_lv_attach() from the LVGL thread");
+    return 0;
+}
+#endif /* BLE_NAVI_DISP_LVGL */
 
 int disp_sink_submit(const struct bir_frame *f)
 {

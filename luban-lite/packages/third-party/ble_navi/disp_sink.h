@@ -24,6 +24,8 @@ void disp_sink_nav(const struct nav_state *ns);
 /* chronos 48x48 1bpp icon, all 3 parts received */
 void disp_sink_turn_icon_1bpp(const uint8_t *bits, uint16_t w, uint16_t h);
 void disp_sink_dump_stats(void);
+/* BLE_NAVI_DISP_LVGL: call once from the LVGL thread (lv_user_gui_init) */
+void ble_navi_lv_attach(void);
 
 /* weak hook: replace with an LVGL label update in your UI; default prints */
 void disp_ui_nav_update(const struct nav_state *ns);

@@ -68,6 +68,18 @@ config BLE_NAVI_TURN_SCALE
     range 1 4
     default 2
 
+config BLE_NAVI_DISP_LVGL
+    bool "Show pictures through LVGL (lv_layer_top), not straight on the framebuffer"
+    default y
+    depends on LPKG_USING_LVGL && LVGL_V_9
+    help
+      Needed when the application runs LVGL: LVGL owns the framebuffer and
+      uses the VE itself ("lv_mpp_dec_open: Invalid status" otherwise).
+      Pictures are decoded in the LVGL thread and shown as an lv_image on the
+      top layer. The application must call ble_navi_lv_attach() once from the
+      LVGL thread; packages/artinchip/lvgl-ui/lv_demo.c does it in
+      lv_user_gui_init().
+
 config BLE_NAVI_ERYA
     bool "尔雅 BLE 导航协议 Ver 1.2 (领骑摩托 app: 0xAAA1..0xAAAA, EY/EB frames)"
     default y
