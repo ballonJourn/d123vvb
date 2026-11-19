@@ -302,25 +302,43 @@ int disp_sink_init(void)
 
 struct lv_layer_img {
     lv_obj_t      *img;
-    lv_image_dsc_t dsc[2];         /* alternate: LVGL caches by src pointer */
-    uint8_t       *buf[2];
-    uint32_t       cap[2];
-    int            cur;
+    lv_image_dsc_t dsc;
+    uint8_t       *buf;
+    uint32_t       cap;
+    int            mem;            /* MEM_DEFAULT or MEM_CMA */
 };
 static struct lv_layer_img s_lv[BIR_NUM_LAYERS];
 static int s_lv_attached;
 
-static uint8_t *lv_next_buf(struct lv_layer_img *L, uint32_t need, int *idx)
+/*
+ * One buffer per layer is enough: it is written and drawn by the same (LVGL)
+ * thread, so LVGL never renders a half-copied picture. Taken from the normal
+ * PSRAM heap first: the CMA pool also holds both framebuffers, the LVGL image
+ * cache and the VE frames, and ran out ("no CMA for 800x480 picture"). D133
+ * has no MMU, so heap memory is physically contiguous for GE as well.
+ */
+static uint8_t *lv_layer_buf(struct lv_layer_img *L, uint32_t need)
 {
-    int i = L->cur ^ 1;
-    if (L->cap[i] < need) {
-        if (L->buf[i])
-            aicos_free_align(MEM_CMA, L->buf[i]);
-        L->buf[i] = aicos_malloc_align(MEM_CMA, need, CACHE_LINE_SIZE);
-        L->cap[i] = L->buf[i] ? need : 0;
+    if (L->cap >= need)
+        return L->buf;
+    if (L->buf) {
+        lv_image_cache_drop(&L->dsc);
+        aicos_free_align(L->mem, L->buf);
+        L->buf = NULL;
+        L->cap = 0;
     }
-    *idx = i;
-    return L->buf[i];
+    L->mem = MEM_DEFAULT;
+    L->buf = aicos_malloc_align(MEM_DEFAULT, need, CACHE_LINE_SIZE);
+    if (!L->buf) {
+        L->mem = MEM_CMA;
+        L->buf = aicos_malloc_align(MEM_CMA, need, CACHE_LINE_SIZE);
+    }
+    if (L->buf) {
+        L->cap = need;
+        rt_kprintf("[disp] picture buffer %u KB from %s heap\n", need / 1024,
+                   L->mem == MEM_CMA ? "CMA" : "PSRAM");
+    }
+    return L->buf;
 }
 
 /* copy RGB565 rows into the layer's spare buffer and show it */
@@ -330,17 +348,18 @@ static int lv_show_rgb565(const uint8_t *px, uint32_t src_stride, uint16_t w, ui
     uint8_t layer = f->layer < BIR_NUM_LAYERS ? f->layer : 0;
     struct lv_layer_img *L = &s_lv[layer];
     uint32_t t = now_ms(), stride = (uint32_t)w * 2, need = stride * h;
-    int i;
-    uint8_t *dst = lv_next_buf(L, need, &i);
+    lv_image_cache_drop(&L->dsc);                  /* old content of this buffer */
+    uint8_t *dst = lv_layer_buf(L, need);
     if (!dst) {
-        rt_kprintf("[disp] no CMA for %ux%u picture\n", w, h);
+        rt_kprintf("[disp] no memory for a %ux%u picture (%u KB) in PSRAM heap or CMA\n",
+                   w, h, need / 1024);
         return -1;
     }
     for (uint32_t y = 0; y < h; y++)
         memcpy(dst + y * stride, px + y * src_stride, stride);
     aicos_dcache_clean_range(dst, need);           /* LVGL may draw it with GE */
 
-    lv_image_dsc_t *d = &L->dsc[i];
+    lv_image_dsc_t *d = &L->dsc;
     memset(d, 0, sizeof(*d));
     d->header.magic = LV_IMAGE_HEADER_MAGIC;
     d->header.cf = LV_COLOR_FORMAT_RGB565;
@@ -354,8 +373,7 @@ static int lv_show_rgb565(const uint8_t *px, uint32_t src_stride, uint16_t w, ui
         L->img = lv_image_create(lv_layer_top());
         lv_obj_remove_flag(L->img, LV_OBJ_FLAG_CLICKABLE);
     }
-    lv_image_cache_drop(d);
-    lv_image_set_src(L->img, d);
+    lv_image_set_src(L->img, d);                   /* invalidates the object */
     lv_obj_set_pos(L->img, f->x, f->y);
     if (f->width && f->height && (f->width != w || f->height != h)) {
         lv_obj_set_size(L->img, f->width, f->height);
@@ -365,7 +383,6 @@ static int lv_show_rgb565(const uint8_t *px, uint32_t src_stride, uint16_t w, ui
     }
     lv_obj_remove_flag(L->img, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(L->img);
-    L->cur = i;
     s_st.last_blit_ms = now_ms() - t;
     return 0;
 }
