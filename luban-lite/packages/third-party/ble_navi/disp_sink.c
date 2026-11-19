@@ -30,6 +30,7 @@
 #define BLE_NAVI_TURN_SCALE 2           /* 48x48 icon shown as 96x96 */
 #endif
 #define DISP_QUEUE_DEPTH 4
+#define DISP_FMT_CLEAR   0xFF            /* internal: hide a layer */
 
 struct disp_msg {
     struct bir_frame f;
@@ -500,6 +501,12 @@ static void handle(struct disp_msg *m)
 {
     struct bir_frame *f = &m->f;
     int ret = -1;
+    if (f->fmt == DISP_FMT_CLEAR) {                 /* hide, keep the buffer */
+        uint8_t layer = f->layer < BIR_NUM_LAYERS ? f->layer : 0;
+        if (s_lv[layer].img)
+            lv_obj_add_flag(s_lv[layer].img, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
     s_st.frames++;
     switch (f->fmt) {
     case BNP_FMT_JPEG:
@@ -555,6 +562,14 @@ void ble_navi_lv_attach(void)
         s_mq = rt_mq_create("disp", sizeof(struct disp_msg), DISP_QUEUE_DEPTH, RT_IPC_FLAG_FIFO);
     lv_timer_create(lv_poll, LV_POLL_MS, NULL);
     s_lv_attached = 1;
+#if defined(BLE_NAVI_LV_PREALLOC_W) && BLE_NAVI_LV_PREALLOC_W > 0 && BLE_NAVI_LV_PREALLOC_H > 0
+    {
+        uint32_t need = ALIGN16(BLE_NAVI_LV_PREALLOC_W) * 2 * ALIGN16(BLE_NAVI_LV_PREALLOC_H);
+        if (!lv_layer_buf(&s_lv[BNP_LAYER_MAP], need))
+            rt_kprintf("[disp] could not preallocate %u KB for %ux%u pictures\n", need / 1024,
+                       BLE_NAVI_LV_PREALLOC_W, BLE_NAVI_LV_PREALLOC_H);
+    }
+#endif
     rt_kprintf("[disp] LVGL top layer attached\n");
 }
 
@@ -592,6 +607,20 @@ int disp_sink_submit_owned(const struct bir_frame *f)
         return -1;
     }
     return 0;
+}
+
+void disp_sink_clear(uint8_t layer)
+{
+#ifdef BLE_NAVI_DISP_LVGL
+    struct disp_msg m;
+    memset(&m, 0, sizeof(m));
+    m.f.fmt = DISP_FMT_CLEAR;
+    m.f.layer = layer;
+    if (s_mq)
+        rt_mq_send(s_mq, &m, sizeof(m));
+#else
+    (void)layer;                                 /* direct mode: the UI repaints itself */
+#endif
 }
 
 void disp_sink_turn_icon_1bpp(const uint8_t *bits, uint16_t w, uint16_t h)

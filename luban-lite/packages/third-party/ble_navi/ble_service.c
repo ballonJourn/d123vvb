@@ -141,6 +141,8 @@ static void erya_navi(void *ctx, const struct nav_state *ns)
 {
     (void)ctx;
     disp_sink_nav(ns);
+    if (!ns->active)                               /* {"fun":"navi","type":"2"} */
+        disp_sink_clear(BNP_LAYER_MAP);
 }
 
 static void erya_setup(void)
