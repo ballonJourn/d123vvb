@@ -24,8 +24,6 @@ void disp_sink_nav(const struct nav_state *ns);
 /* chronos 48x48 1bpp icon, all 3 parts received */
 void disp_sink_turn_icon_1bpp(const uint8_t *bits, uint16_t w, uint16_t h);
 void disp_sink_dump_stats(void);
-/* hide the picture of a layer (BNP_LAYER_MAP / BNP_LAYER_TURN), e.g. on navigation end */
-void disp_sink_clear(uint8_t layer);
 /* BLE_NAVI_DISP_LVGL: call once from the LVGL thread (lv_user_gui_init) */
 void ble_navi_lv_attach(void);
 

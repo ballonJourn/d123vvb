@@ -80,20 +80,6 @@ config BLE_NAVI_DISP_LVGL
       LVGL thread; packages/artinchip/lvgl-ui/lv_demo.c does it in
       lv_user_gui_init().
 
-config BLE_NAVI_LV_PREALLOC_W
-    int "Picture buffer preallocated at boot: width (0 = allocate on first picture)"
-    depends on BLE_NAVI_DISP_LVGL
-    default 800
-    help
-      Taken from CMA in ble_navi_lv_attach(), before the UI loads its images.
-      Allocating it later, between LVGL cached images, fragments CMA and LVGL
-      then fails to decode its own large images ("lv_mpp_dec_open: Invalid
-      status"). Use the largest picture you expect (尔雅: AAA6 w x h).
-config BLE_NAVI_LV_PREALLOC_H
-    int "Picture buffer preallocated at boot: height"
-    depends on BLE_NAVI_DISP_LVGL
-    default 480
-
 config BLE_NAVI_ERYA
     bool "尔雅 BLE 导航协议 Ver 1.2 (领骑摩托 app: 0xAAA1..0xAAAA, EY/EB frames)"
     default y
