@@ -110,10 +110,15 @@ config BLE_NAVI_ERYA_MODEL_KEY
 
 config BLE_NAVI_ERYA_PIC_W
     int "Requested picture width"
-    default 800
+    default 480
+    help
+      Asked from the phone in AAA6. The decoded picture is kept in CMA
+      (w x h x 2 bytes); on demo88 CMA is ~3.9 MB with ~2.4 MB taken by the
+      framebuffers, so 800x480 (750 KB) starves the LVGL UI. 480x288
+      (270 KB) is stretched to BLE_NAVI_ERYA_DISP_W x _H on screen.
 config BLE_NAVI_ERYA_PIC_H
     int "Requested picture height"
-    default 480
+    default 288
 config BLE_NAVI_ERYA_PIC_Q
     int "Requested picture quality (120..200, ratio = value - 100)"
     range 120 200
@@ -130,10 +135,10 @@ config BLE_NAVI_ERYA_DISP_Y
     default 60
 config BLE_NAVI_ERYA_DISP_W
     int "Picture width on screen (0 = as received)"
-    default 0
+    default 800
 config BLE_NAVI_ERYA_DISP_H
     int "Picture height on screen (0 = as received)"
-    default 0
+    default 480
 
 config BLE_NAVI_ERYA_LOG
     bool "Log every protocol step on the console (reads, writes, notifies, pictures)"

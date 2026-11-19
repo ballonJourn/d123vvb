@@ -376,11 +376,51 @@ void ble_navi_release(uint8_t layer)
 }
 
 /* ---------------- msh ---------------- */
+/*
+ * Read-only check whether the PSRAM above AIC_PSRAM_SW_SIZE (code, data, CMA)
+ * and the heap_psram_sw region below it are the same physical memory, i.e.
+ * the board has less PSRAM than AIC_PSRAM_SIZE says. Compares 1024 words of
+ * this module's code with the words AIC_PSRAM_SW_SIZE lower. Nothing is
+ * written.
+ */
+static void psram_alias_check(void)
+{
+#if defined(AIC_PSRAM_SIZE) && defined(AIC_PSRAM_SW_SIZE) && AIC_PSRAM_SW_SIZE > 0
+    uintptr_t code = (uintptr_t)&ble_navi_init & ~(uintptr_t)0xFFF;
+    uintptr_t sw_lo = 0x40000000u, sw_hi = 0x40000000u + AIC_PSRAM_SW_SIZE;
+    rt_kprintf("AIC_PSRAM_SIZE=0x%x AIC_PSRAM_SW_SIZE=0x%x, code at 0x%08lx\n",
+               (unsigned)AIC_PSRAM_SIZE, (unsigned)AIC_PSRAM_SW_SIZE, (unsigned long)code);
+    if (code < sw_hi || code - AIC_PSRAM_SW_SIZE < sw_lo) {
+        rt_kprintf("code is not above the psram_sw region, nothing to compare\n");
+        return;
+    }
+    const volatile uint32_t *a = (const volatile uint32_t *)code;
+    const volatile uint32_t *b = (const volatile uint32_t *)(code - AIC_PSRAM_SW_SIZE);
+    int same = 0, n = 1024;
+    for (int i = 0; i < n; i++)
+        same += (a[i] == b[i]);
+    rt_kprintf("0x%08lx vs 0x%08lx: %d/%d words identical\n", (unsigned long)code,
+               (unsigned long)(code - AIC_PSRAM_SW_SIZE), same, n);
+    if (same == n)
+        rt_kprintf("=> ALIASED: the board has %u MB PSRAM or less. heap_psram_sw overlaps the "
+                   "code/CMA region: nothing may allocate MEM_PSRAM_SW. Set AIC_PSRAM_SIZE to the "
+                   "real size in the defconfig.\n", (unsigned)(AIC_PSRAM_SW_SIZE >> 20));
+    else
+        rt_kprintf("=> not aliased: heap_psram_sw is separate memory\n");
+#else
+    rt_kprintf("no PSRAM software region configured\n");
+#endif
+}
+
 static int cmd_ble_navi(int argc, char **argv)
 {
     struct ble_navi *b = &g_ble_navi;
     if (argc >= 2 && !strcmp(argv[1], "start"))
         return ble_navi_init();
+    if (argc >= 2 && !strcmp(argv[1], "psram")) {
+        psram_alias_check();
+        return 0;
+    }
     struct bir_stats *s = &b->rx.st;
     ble_port_refresh_link(&b->link);
     rt_kprintf("conn=0x%04x mtu=%u ci=%u*1.25ms lat=%u to=%u*10ms phy=%u/%u dle=%u/%u backend=%u\n",
@@ -405,4 +445,4 @@ static int cmd_ble_navi(int argc, char **argv)
     disp_sink_dump_stats();
     return 0;
 }
-MSH_CMD_EXPORT_ALIAS(cmd_ble_navi, ble_navi, ble_navi [start] - BLE navigation image receiver);
+MSH_CMD_EXPORT_ALIAS(cmd_ble_navi, ble_navi, ble_navi [start|psram] - BLE navigation image receiver);
