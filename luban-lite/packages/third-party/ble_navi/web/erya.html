@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>尔雅 BLE 导航协议 发送端</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Semi+Condensed:wght@500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --paper: #EEF2F5; --sheet: #FFFFFF; --ink: #14324A; --ink-2: #4B6478; --rule: #C9D3DB;
+  --ok: #2B8C83; --retx: #D9952E; --lost: #C0453B; --sent: #7FA7C4; --pend: #DCE3E9;
+  --focus: #1F6FB2;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #16202A; --sheet: #1D2934; --ink: #E3ECF3; --ink-2: #9DB1C2; --rule: #34465A;
+    --ok: #3FB0A5; --retx: #E8A84A; --lost: #E0685E; --sent: #5D8AAD; --pend: #2A3947;
+    --focus: #6FB1EA; color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  font: 15px/1.45 "Barlow", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: var(--ink); background: var(--paper);
+  /* plotter-paper grid */
+  background-image: linear-gradient(var(--rule) 1px, transparent 1px),
+                    linear-gradient(90deg, var(--rule) 1px, transparent 1px);
+  background-size: 24px 24px; background-attachment: fixed;
+  font-variant-numeric: tabular-nums;
+}
+@media (prefers-color-scheme: dark) { body { background-image: none; } }
+header { padding: 18px 24px 8px; display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+h1 { font: 600 24px/1.1 "Barlow Semi Condensed", "Barlow", sans-serif; margin: 0; letter-spacing: .01em; }
+#linkline { color: var(--ink-2); }
+main { display: grid; grid-template-columns: minmax(280px, 340px) 1fr; gap: 16px; padding: 8px 24px 24px; }
+@media (max-width: 860px) { main { grid-template-columns: 1fr; padding: 8px 12px 16px; } header { padding: 14px 12px 6px; } }
+aside, section { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; }
+aside { padding: 14px 16px; align-self: start; }
+fieldset { border: 0; border-top: 1px solid var(--rule); margin: 0; padding: 12px 0 14px; min-width: 0; }
+input[type=file] { max-width: 100%; min-width: 0; }
+fieldset:first-child { border-top: 0; padding-top: 0; }
+legend { font: 600 16px "Barlow Semi Condensed", sans-serif; padding: 0 0 6px; }
+label { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 150px); align-items: center; gap: 8px; margin: 6px 0; color: var(--ink-2); }
+label.wide { grid-template-columns: 1fr; }
+input, select, button { font: inherit; color: var(--ink); }
+input[type=number], input[type=text], select {
+  width: 100%; min-width: 0; padding: 5px 8px; border: 1px solid var(--rule); border-radius: 4px; background: var(--paper);
+}
+input[type=range] { width: 100%; min-width: 0; margin: 0; accent-color: var(--ok); }
+button {
+  padding: 7px 14px; border-radius: 4px; border: 1px solid var(--ink); background: var(--sheet); cursor: pointer;
+}
+button.primary { background: var(--ink); color: var(--sheet); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.wh { display: flex; gap: 6px; min-width: 0; }
+.wh input { flex: 1 1 0; padding: 5px 4px; }
+#sResult { font-size: 17px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+#preview { width: 100%; aspect-ratio: 1024 / 600; border: 1px solid var(--rule); border-radius: 4px; background: var(--paper); display: block; margin-top: 8px; }
+#imginfo, .hint { color: var(--ink-2); font-size: 13px; margin: 6px 0 0; }
+.icons { display: flex; gap: 6px; margin-top: 6px; }
+.icons canvas { width: 48px; height: 48px; border: 1px solid var(--rule); border-radius: 4px; cursor: pointer; image-rendering: pixelated; background: #000; }
+.icons canvas[aria-pressed=true] { outline: 2px solid var(--ok); outline-offset: 1px; }
+
+.right { display: grid; gap: 16px; align-content: start; min-width: 0; }
+section { padding: 14px 16px; min-width: 0; }
+.maphead { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+#progress { font: 600 44px/1 "Barlow Semi Condensed", sans-serif; }
+#progress small { font-size: 18px; color: var(--ink-2); font-weight: 500; margin-left: 8px; }
+#chunkmap { width: 100%; height: 300px; display: block; margin-top: 10px; image-rendering: pixelated; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; color: var(--ink-2); font-size: 13px; margin-top: 8px; }
+.legend i { display: inline-block; width: 11px; height: 11px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 4px 18px; }
+.stats div { padding: 6px 0; border-bottom: 1px solid var(--rule); }
+.stats b { display: block; font: 600 22px/1.15 "Barlow Semi Condensed", sans-serif; }
+.stats span { color: var(--ink-2); font-size: 13px; }
+.chartbox { position: relative; height: 220px; }
+#log { height: 150px; overflow: auto; font-size: 13px; color: var(--ink-2); white-space: pre-wrap; margin: 0; }
+#log .err { color: var(--lost); }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+dl.hs { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; margin: 4px 0 0; font-size: 14px; }
+dl.hs dt { color: var(--ink-2); }
+dl.hs dd { margin: 0; overflow-wrap: anywhere; }
+dd.ok { color: var(--ok); } dd.bad { color: var(--lost); }
+.nav a { color: var(--focus); }
+#steps { margin: 6px 0 0; padding-left: 20px; color: var(--ink-2); font-size: 13px; }
+#steps li.done { color: var(--ok); }
+</style>
+</head>
+<body>
+<header>
+  <h1>尔雅 BLE 导航协议 发送端</h1>
+  <span id="linkline">未连接。电脑扮演“领骑摩托”App，按协议 Ver 1.2 组包发送。</span>
+  <span class="nav"><a href="index.html">BNP 发送端</a></span>
+</header>
+<main>
+  <aside>
+    <fieldset>
+      <legend>连接</legend>
+      <label>手机类型（写 AAA5）
+        <select id="phone"><option value="0">0x00 安卓</option><option value="1">0x01 苹果</option></select></label>
+      <label>每次写入字节（MTU−3）<input id="maxw" type="number" min="20" max="512" value="244"></label>
+      <label>AAA7 写入方式
+        <select id="wmode"><option value="nr">无响应写（快）</option><option value="r">有响应写（稳）</option></select></label>
+      <div class="row">
+        <button id="btnConnect" class="primary">连接 EY_ 设备</button>
+        <button id="btnDisconnect" disabled>断开</button>
+      </div>
+      <ol id="steps">
+        <li id="st1">读 AAA5：MAC &amp; 车型 key</li>
+        <li id="st2">写 AAA5：手机类型</li>
+        <li id="st3">收 AAA4：“-3”</li>
+        <li id="st4">收 AAA6：图片格式</li>
+      </ol>
+      <dl class="hs">
+        <dt>MAC</dt><dd id="hMac">–</dd>
+        <dt>车型 key</dt><dd id="hKey">–</dd>
+        <dt>AAA4</dt><dd id="hA4">–</dd>
+        <dt>图片格式</dt><dd id="hFmt">–</dd>
+        <dt>MTU</dt><dd id="hMtu">–</dd>
+      </dl>
+    </fieldset>
+    <fieldset>
+      <legend>导航图片（AAA7，EB 分包）</legend>
+      <label>来源
+        <select id="src"><option value="sample">示例导航画面</option><option value="file">本地图片</option></select></label>
+      <label class="wide"><input id="file" type="file" accept="image/*"></label>
+      <label>连续发送间隔 ms<input id="interval" type="number" min="0" value="1000"></label>
+      <div class="row">
+        <button id="btnPic" class="primary" disabled>发送一张</button>
+        <button id="btnLoop" disabled>连续发送</button>
+        <button id="btnStop" disabled>停止</button>
+      </div>
+      <canvas id="preview" width="800" height="480" aria-label="将要发送的画面"></canvas>
+      <p id="imginfo"></p>
+    </fieldset>
+    <fieldset>
+      <legend>导航信息（AAA8，EY 字符串）</legend>
+      <label>type
+        <select id="ntype"><option value="0">0 开始导航</option><option value="1" selected>1 道路信息</option><option value="2">2 结束导航</option></select></label>
+      <label>curStepRetainDistance 米<input id="nStep" type="text" value="350"></label>
+      <label>nextRoadName<input id="nRoad" type="text" value="世纪路"></label>
+      <label>pathRetainTime 秒<input id="nTime" type="text" value="780"></label>
+      <label>pathRetainDistance 米<input id="nDist" type="text" value="5200"></label>
+      <label>iconType<input id="nIcon" type="text" value="2"></label>
+      <label>arriveTime<input id="nEta" type="text" value="13:40"></label>
+      <div class="row"><button id="btnNavi" disabled>发送导航信息</button></div>
+      <p class="hint">发出的 JSON 字段名与协议文档一致；设备串口会打印 [erya] write &lt;-phone AAA8 和 [nav] 行。</p>
+    </fieldset>
+  </aside>
+
+  <div class="right">
+    <section aria-label="分包图">
+      <div class="maphead">
+        <div id="progress">0%<small>等待发送</small></div>
+        <div id="frameinfo" class="hint"></div>
+      </div>
+      <canvas id="chunkmap" aria-label="每个格子是一个 EB 包"></canvas>
+      <div class="legend">
+        <span><i style="background:var(--pend)"></i>待发</span>
+        <span><i style="background:var(--ok)"></i>已写入</span>
+        <span><i style="background:var(--lost)"></i>写入失败</span>
+      </div>
+      <p class="hint">尔雅协议没有逐包确认：这里显示的是浏览器写入成功的包。设备是否拼好整张图，看串口 [erya] AAA7 picture complete 或 ble_navi 的 pics ok。</p>
+    </section>
+    <section aria-label="统计">
+      <div class="stats">
+        <div><b id="sThr">–</b><span>本张写入速率 KB/s</span></div>
+        <div><b id="sPkts">–</b><span>EB 包 / 写入次数</span></div>
+        <div><b id="sBytes">–</b><span>JPEG KB</span></div>
+        <div><b id="sTime">–</b><span>本张用时 s</span></div>
+        <div><b id="sPics">0</b><span>已发图片</span></div>
+        <div><b id="sFail">0</b><span>写入失败</span></div>
+      </div>
+    </section>
+    <section aria-label="每张图的写入速率">
+      <div class="chartbox"><canvas id="chart"></canvas></div>
+    </section>
+    <section aria-label="日志"><pre id="log"></pre></section>
+  </div>
+</main>
+<script src="vendor/chart.umd.min.js"></script>
+<script type="module" src="erya_app.js"></script>
+</body>
+</html>

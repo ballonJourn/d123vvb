@@ -43,3 +43,15 @@ D133 作为 BLE 外设（GATT Server），接收手机或电脑发来的导航�
 **车型 key：** 协议要求 AAA5 里带尔雅发放的车型 key（`BLE_NAVI_ERYA_MODEL_KEY`，默认空）。没有正式 key 时 App 可能拒绝投屏，需要通过商务向尔雅申请。
 
 **文档里没写明、按假设实现的部分：** 服务 UUID 取 0xAAA0（`BLE_NAVI_ERYA_SVC_UUID` 可改）；AAA1～AAAA 全部开放读、写、无响应写和通知；AAA7/AAA8 按字节流解析，所以 App 一个包拆成多次写入或一次写入带多个包都能处理。
+
+### 尔雅协议网页发送端（电脑扮演领骑摩托 App）
+
+`web/erya.html`（与 `index.html` 同一个服务，页头有互相跳转的链接）：
+
+1. 连接 `EY_` 设备，读 AAA5（MAC & 车型 key），写手机类型，收 AAA4 `-3` 和 AAA6 图片格式。车型 key 为空时照样继续，便于在激活前开发。
+2. 按 AAA6 给的宽高和质量（q−100 → JPEG 质量）编码示例导航画面或本地图片，按 MTU 切成 EB 包写 AAA7；可连续发送，模拟导航刷新。MTU 从同一固件的 BNP 状态特征读取。
+3. 表单填写 `fun:navi` 的字段，组 EY 帧写 AAA8。
+
+协议没有逐包确认，页面显示的是浏览器写入成功的包；设备是否拼好整张图，看串口 `[erya] AAA7 picture complete` 或 `ble_navi` 的 `pics ok`。
+
+测试（`tools/`）：`make erya` 测固件引擎；`make erya-web` 用 `erya_sender.js` 组包、经 `erya_replay` 交给固件代码比对；`make erya-ui` 在 jsdom 里点完整个页面（假 BLE 设备），记录的写入再交给固件代码回放（一次性准备：`npm i --prefix tools jsdom@24 @napi-rs/canvas`）。

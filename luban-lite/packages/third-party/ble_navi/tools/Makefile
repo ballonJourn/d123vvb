@@ -12,5 +12,22 @@ erya_test: erya_test.c $(FW)/erya_proto.c $(FW)/erya_json.c $(FW)/erya_proto.h $
 	$(CC) $(CFLAGS) erya_test.c $(FW)/erya_proto.c $(FW)/erya_json.c $(CJSON)/cJSON.c -o $@
 
 clean:
-	rm -f erya_test
+	rm -f erya_test erya_replay
 .PHONY: erya clean
+
+# web/erya_sender.js -> firmware engine interop (needs node)
+JPG ?= ../web/sample_nav.jpg
+erya_replay: erya_replay.c $(FW)/erya_proto.c $(FW)/erya_json.c $(FW)/erya_proto.h
+	$(CC) $(CFLAGS) erya_replay.c $(FW)/erya_proto.c $(FW)/erya_json.c $(CJSON)/cJSON.c -o $@
+erya-web: erya_replay
+	node erya_js_test.mjs $(JPG) /tmp/erya_web_writes.bin
+	./erya_replay /tmp/erya_web_writes.bin $(JPG)
+.PHONY: erya-web
+
+# web/erya.html + erya_app.js clicked through in jsdom with a fake BLE device,
+# then every recorded write replayed into the firmware engine.
+# One-time: npm i --prefix . jsdom@24 @napi-rs/canvas
+erya-ui: erya_replay
+	node erya_web_ui_test.mjs /tmp/erya_ui_writes.bin /tmp/erya_ui_last.jpg
+	./erya_replay /tmp/erya_ui_writes.bin /tmp/erya_ui_last.jpg
+.PHONY: erya-ui
