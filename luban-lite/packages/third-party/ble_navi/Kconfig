@@ -135,6 +135,10 @@ config BLE_NAVI_ERYA_DISP_H
     int "Picture height on screen (0 = as received)"
     default 0
 
+config BLE_NAVI_ERYA_LOG
+    bool "Log every protocol step on the console (reads, writes, notifies, pictures)"
+    default y
+
 config BLE_NAVI_ERYA_MAX_PIC_BYTES
     int "Largest accepted picture (bytes)"
     default 524288

@@ -66,12 +66,56 @@ static void ops_nav(void *ctx, const uint8_t *tlv, uint16_t n)
 #ifndef BLE_NAVI_ERYA_MODEL_KEY
 #define BLE_NAVI_ERYA_MODEL_KEY ""
 #endif
+#ifdef BLE_NAVI_ERYA_LOG
+/* print a value the way the protocol document writes it:
+ *   EY frame -> EY len=N {json}   EB frame -> EB json=N bin=M {json}
+ *   text     -> "text"            other    -> hex */
+static void erya_log_value(const char *what, uint16_t uuid, const uint8_t *b, uint16_t n)
+{
+    char t[200];
+    uint16_t k = 0, i, start = 0;
+    if (n >= 6 && b[0] == 'E' && b[1] == 'Y') {
+        uint32_t jl = ((uint32_t)b[2] << 24) | (b[3] << 16) | (b[4] << 8) | b[5];
+        rt_kprintf("[erya] %s %04X: EY len=%u ", what, uuid, jl);
+        start = 6;
+    } else if (n >= 10 && b[0] == 'E' && b[1] == 'B') {
+        uint32_t jl = ((uint32_t)b[2] << 24) | (b[3] << 16) | (b[4] << 8) | b[5];
+        uint32_t bl = ((uint32_t)b[6] << 24) | (b[7] << 16) | (b[8] << 8) | b[9];
+        rt_kprintf("[erya] %s %04X: EB json=%u bin=%u ", what, uuid, jl, bl);
+        start = 10;
+        if (jl < (uint32_t)(n - 10))
+            n = (uint16_t)(10 + jl);       /* do not print the JPEG bytes */
+    } else {
+        int text = 1;
+        for (i = 0; i < n; i++)
+            if (b[i] < 0x20 && b[i] != '\t') text = 0;
+        if (!text || n == 0) {
+            rt_kprintf("[erya] %s %04X: %u bytes hex", what, uuid, n);
+            for (i = 0; i < n && i < 32; i++)
+                rt_kprintf(" %02x", b[i]);
+            rt_kprintf("\n");
+            return;
+        }
+        rt_kprintf("[erya] %s %04X: ", what, uuid);
+    }
+    for (i = start; i < n && k < sizeof(t) - 1; i++)
+        t[k++] = (char)b[i];
+    t[k] = 0;
+    rt_kprintf("%s%s\n", t, (n - start > k) ? " ..." : "");
+}
+#define ERYA_LOG(...) rt_kprintf(__VA_ARGS__)
+#else
+#define erya_log_value(w, u, b, n) do { } while (0)
+#define ERYA_LOG(...) do { } while (0)
+#endif
+
 static int erya_notify(void *ctx, uint16_t uuid, const uint8_t *b, uint16_t n)
 {
     (void)ctx;
     int rc = ble_port_notify_erya(uuid, b, n);
     if (rc)
         g_ble_navi.notify_fail++;
+    erya_log_value(rc ? "notify FAILED" : "notify ->phone", uuid, b, n);
     return rc;
 }
 static void erya_picture(void *ctx, uint8_t *buf, uint32_t len)
@@ -88,6 +132,9 @@ static void erya_picture(void *ctx, uint8_t *buf, uint32_t len)
     f.data = buf;
     f.len = len;
     f.rx_ms = ops_now(NULL);
+    ERYA_LOG("[erya] AAA7 picture complete: %u bytes in %u ms, JPEG %s -> display\n",
+             len, g_ble_navi.erya.st.last_pic_ms,
+             (len > 3 && buf[0] == 0xFF && buf[1] == 0xD8) ? "SOI ok" : "NO SOI (not a JPEG?)");
     disp_sink_submit_owned(&f);         /* sink frees buf */
 }
 static void erya_navi(void *ctx, const struct nav_state *ns)
@@ -122,7 +169,28 @@ void ble_navi_erya_set_mac(const char *mac12)
 }
 void ble_navi_on_erya_write(uint16_t uuid, const uint8_t *b, uint16_t n)
 {
-    erya_on_write(&g_ble_navi.erya, uuid, b, n);
+    struct erya *e = &g_ble_navi.erya;
+#ifdef BLE_NAVI_ERYA_LOG
+    uint32_t lost0 = e->st.pics_lost, big0 = e->st.pics_too_big, jerr0 = e->st.json_err;
+    int32_t next0 = e->pic_next;
+    if (uuid != ERYA_UUID_AAA7)            /* AAA7 = JPEG packets: summarised below */
+        erya_log_value("write <-phone", uuid, b, n);
+#endif
+    erya_on_write(e, uuid, b, n);
+#ifdef BLE_NAVI_ERYA_LOG
+    if (uuid == ERYA_UUID_AAA5)
+        rt_kprintf("[erya] phone type = %d (0 Android, 1 iOS)\n", e->phone);
+    if (next0 < 1 && e->pic_next >= 1)
+        rt_kprintf("[erya] AAA7 picture start: sum=%u size=%u (first packet %u bytes)\n",
+                   e->pic_sum, e->pic_size, e->pic_got);
+    if (e->st.pics_lost != lost0)
+        rt_kprintf("[erya] AAA7 picture dropped (packet gap/out of order), lost=%u\n",
+                   e->st.pics_lost);
+    if (e->st.pics_too_big != big0)
+        rt_kprintf("[erya] AAA7 picture too big (> BLE_NAVI_ERYA_MAX_PIC_BYTES)\n");
+    if (e->st.json_err != jerr0)
+        rt_kprintf("[erya] %04X JSON not understood, json_err=%u\n", uuid, e->st.json_err);
+#endif
 }
 void ble_navi_on_erya_subscribe(uint16_t uuid)
 {
@@ -130,7 +198,18 @@ void ble_navi_on_erya_subscribe(uint16_t uuid)
 }
 uint16_t ble_navi_erya_read(uint16_t uuid, uint8_t *out, uint16_t cap)
 {
-    return erya_read(&g_ble_navi.erya, uuid, out, cap);
+    uint16_t n = erya_read(&g_ble_navi.erya, uuid, out, cap);
+#ifdef BLE_NAVI_ERYA_LOG
+    /* the app polls AAA5 until it gets the address: log the first reads only */
+    static uint32_t reads[ERYA_NUM_CHR];
+    uint32_t c = (uuid >= 0xAAA1 && uuid <= 0xAAAA) ? ++reads[uuid - 0xAAA1] : 0;
+    if (c <= 3 || c % 50 == 0) {
+        char what[24];
+        rt_snprintf(what, sizeof(what), "read #%u ->phone", c);
+        erya_log_value(what, uuid, out, n);
+    }
+#endif
+    return n;
 }
 #endif
 
