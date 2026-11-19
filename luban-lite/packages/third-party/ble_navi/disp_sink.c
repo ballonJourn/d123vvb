@@ -105,43 +105,87 @@ static int show_raw(const struct bir_frame *f, enum mpp_pixel_format fmt, uint32
     return blit(&src, f->x, f->y, f->width, f->height);
 }
 
+/*
+ * VE output format for JPEG. D13x GE cannot bitblt from YUV ("bitblt not
+ * support yuv format, except src format yuv400"), so let the VE convert:
+ * VE V30 (D13x) has yuv2rgb and outputs RGB_565/RGB_888/ARGB_8888 directly
+ * (mjpeg_decoder.c parse_pix_fmt), as lvgl_v8/lv_drivers/aic_dec.c does when
+ * !AIC_VE_DRV_V10. Same format as the framebuffer -> GE only copies/scales.
+ */
+static enum mpp_pixel_format jpeg_out_fmt(void)
+{
+#ifdef AIC_VE_DRV_V10
+    return MPP_FMT_NV12;               /* old VE: no yuv2rgb, GE there takes YUV */
+#else
+    switch (s_info.format) {
+    case MPP_FMT_RGB_565: case MPP_FMT_BGR_565:
+    case MPP_FMT_RGB_888: case MPP_FMT_BGR_888:
+    case MPP_FMT_ARGB_8888: case MPP_FMT_ABGR_8888:
+    case MPP_FMT_RGBA_8888: case MPP_FMT_BGRA_8888:
+        return (enum mpp_pixel_format)s_info.format;
+    default:
+        return MPP_FMT_RGB_565;
+    }
+#endif
+}
+
 static int show_jpeg(const struct bir_frame *f)
 {
-    if (f->len < 4 || f->data[0] != 0xFF || f->data[1] != 0xD8)
+    if (f->len < 4 || f->data[0] != 0xFF || f->data[1] != 0xD8) {
+        rt_kprintf("[disp] not a JPEG (no FFD8), %u bytes\n", f->len);
         return -1;
+    }
     struct decode_config cfg;
     memset(&cfg, 0, sizeof(cfg));
     cfg.bitstream_buffer_size = (f->len + 1023) & ~1023u;
     cfg.extra_frame_num = 0;
     cfg.packet_count = 1;
-    cfg.pix_fmt = MPP_FMT_NV12;           /* as pic_dec_test; GE converts to fb fmt */
+    cfg.pix_fmt = jpeg_out_fmt();
 
     uint32_t t = now_ms();
     struct mpp_decoder *dec = mpp_decoder_create(MPP_CODEC_VIDEO_DECODER_MJPEG);
-    if (!dec)
+    if (!dec) {
+        rt_kprintf("[disp] mpp_decoder_create(MJPEG) failed\n");
         return -1;
+    }
     int ret = -1;
-    if (mpp_decoder_init(dec, &cfg) < 0)
+    if (mpp_decoder_init(dec, &cfg) < 0) {
+        rt_kprintf("[disp] decoder init failed (out fmt %d, %u bytes)\n", cfg.pix_fmt, f->len);
         goto out;
+    }
 
     struct mpp_packet pkt;
     memset(&pkt, 0, sizeof(pkt));
-    if (mpp_decoder_get_packet(dec, &pkt, f->len) < 0)
+    if (mpp_decoder_get_packet(dec, &pkt, f->len) < 0) {
+        rt_kprintf("[disp] decoder get_packet failed\n");
         goto out;
+    }
     memcpy(pkt.data, f->data, f->len);
     pkt.size = f->len;
     pkt.flag = PACKET_FLAG_EOS;
     mpp_decoder_put_packet(dec, &pkt);
-    if (mpp_decoder_decode(dec) < 0)
+    if (mpp_decoder_decode(dec) < 0) {
+        rt_kprintf("[disp] JPEG decode failed (baseline JPEG expected)\n");
         goto out;
+    }
 
     struct mpp_frame fr;
     memset(&fr, 0, sizeof(fr));
-    if (mpp_decoder_get_frame(dec, &fr) < 0)
+    if (mpp_decoder_get_frame(dec, &fr) < 0) {
+        rt_kprintf("[disp] decoder get_frame failed\n");
         goto out;
+    }
     s_st.last_decode_ms = now_ms() - t;
     /* width/height in START = target size on screen (0 = native) */
     ret = blit(&fr.buf, f->x, f->y, f->width, f->height);
+#ifdef BLE_NAVI_ERYA_LOG
+    rt_kprintf("[disp] JPEG %ux%u fmt %d -> (%u,%u) decode %u ms, blit %u ms%s\n",
+               fr.buf.size.width, fr.buf.size.height, fr.buf.format, f->x, f->y,
+               s_st.last_decode_ms, s_st.last_blit_ms, ret ? " BLIT FAILED" : "");
+#else
+    if (ret)
+        rt_kprintf("[disp] bitblt failed (src fmt %d)\n", fr.buf.format);
+#endif
     mpp_decoder_put_frame(dec, &fr);
 out:
     mpp_decoder_destory(dec);
