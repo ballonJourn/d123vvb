@@ -442,6 +442,12 @@ static int cmd_ble_navi(int argc, char **argv)
                    e->st.json_err);
     }
 #endif
+#if defined(LPKG_NIMBLE_HCI_H4)
+    {
+        extern volatile uint32_t hci_h4_resync_count;
+        rt_kprintf("hci h4 resync (uart bytes lost, frame dropped): %u\n", hci_h4_resync_count);
+    }
+#endif
     disp_sink_dump_stats();
     return 0;
 }

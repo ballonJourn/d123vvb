@@ -1,0 +1,2 @@
+#define BLE_HCI_EVCODE_LE_META 0x3e
+#define BLE_HCI_LE_SUBEV_ADV_RPT 0x02

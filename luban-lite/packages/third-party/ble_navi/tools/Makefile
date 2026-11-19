@@ -12,7 +12,7 @@ erya_test: erya_test.c $(FW)/erya_proto.c $(FW)/erya_json.c $(FW)/erya_proto.h $
 	$(CC) $(CFLAGS) erya_test.c $(FW)/erya_proto.c $(FW)/erya_json.c $(CJSON)/cJSON.c -o $@
 
 clean:
-	rm -f erya_test erya_replay
+	rm -f erya_test erya_replay h4_fuzz
 .PHONY: erya clean
 
 # web/erya_sender.js -> firmware engine interop (needs node)
@@ -31,3 +31,14 @@ erya-ui: erya_replay
 	node erya_web_ui_test.mjs /tmp/erya_ui_writes.bin /tmp/erya_ui_last.jpg
 	./erya_replay /tmp/erya_ui_writes.bin /tmp/erya_ui_last.jpg
 .PHONY: erya-ui
+
+# patched nimble hci_h4.c under random UART byte loss (ASan/UBSan): no assert,
+# no leak, full resync on a clean stream
+NIMBLE := ../../nimble
+h4_fuzz: h4_fuzz.c $(NIMBLE)/nimble/transport/common/hci_h4/src/hci_h4.c
+	$(CC) -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -Ih4_shim \
+	  -I$(NIMBLE)/nimble/transport/common/hci_h4/include h4_fuzz.c \
+	  $(NIMBLE)/nimble/transport/common/hci_h4/src/hci_h4.c -o $@
+h4: h4_fuzz
+	./h4_fuzz
+.PHONY: h4

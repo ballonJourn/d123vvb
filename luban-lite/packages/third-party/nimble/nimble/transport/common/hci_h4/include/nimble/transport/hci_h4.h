@@ -67,4 +67,7 @@ void hci_h4_sm_init(struct hci_h4_sm *h4sm,
 
 int hci_h4_sm_rx(struct hci_h4_sm *h4sm, const uint8_t *buf, uint16_t len);
 
+/* frames dropped after an H4 sync loss (see hci_h4.c) */
+extern volatile uint32_t hci_h4_resync_count;
+
 #endif /* _HCI_H4_H_ */

@@ -55,6 +55,41 @@ struct hci_h4_input_buffer {
     uint16_t len;
 };
 
+/*
+ * Sync-loss recovery (D133 / AIC8800 H4 over UART2): when bytes are lost on
+ * the UART the stream desyncs and the next "header" is garbage (unknown or
+ * unsupported packet type, absurd length, allocation failure). Upstream
+ * asserted and the hci_uart_rx thread died. Now the current frame is dropped,
+ * the state machine goes back to waiting for a packet type, and parsing
+ * continues; hci_h4_resync_count counts these events.
+ */
+volatile uint32_t hci_h4_resync_count;
+
+static void
+hci_h4_sm_drop(struct hci_h4_sm *h4sm)
+{
+    switch (h4sm->pkt_type) {
+    case HCI_H4_ACL:
+    case HCI_H4_ISO:
+        if (h4sm->om) {
+            os_mbuf_free_chain(h4sm->om);
+        }
+        break;
+    case HCI_H4_CMD:
+    case HCI_H4_EVT:
+        if (h4sm->buf) {
+            ble_transport_free(h4sm->buf);
+        }
+        break;
+    default:
+        break;
+    }
+    h4sm->om = NULL;
+    h4sm->len = 0;
+    h4sm->exp_len = 0;
+    hci_h4_resync_count++;
+}
+
 static int
 hci_h4_frame_start(struct hci_h4_sm *rxs, uint8_t pkt_type)
 {
@@ -119,7 +154,9 @@ hci_h4_sm_w4_header(struct hci_h4_sm *h4sm, struct hci_h4_input_buffer *ib)
 
     switch (h4sm->pkt_type) {
     case HCI_H4_CMD:
-        assert(h4sm->allocs && h4sm->allocs->cmd);
+        if (!h4sm->allocs || !h4sm->allocs->cmd) {
+            return -1;                          /* not expected on this side */
+        }
         h4sm->buf = h4sm->allocs->cmd();
         if (!h4sm->buf) {
             return -1;
@@ -129,7 +166,12 @@ hci_h4_sm_w4_header(struct hci_h4_sm *h4sm, struct hci_h4_input_buffer *ib)
         h4sm->exp_len = h4sm->hdr[2] + 3;
         break;
     case HCI_H4_ACL:
-        assert(h4sm->allocs && h4sm->allocs->acl);
+        if (!h4sm->allocs || !h4sm->allocs->acl) {
+            return -1;
+        }
+        if (get_le16(&h4sm->hdr[2]) > MYNEWT_VAL(BLE_TRANSPORT_ACL_SIZE)) {
+            return -1;                          /* garbage length: sync loss */
+        }
         h4sm->om = h4sm->allocs->acl();
         if (!h4sm->om) {
             return -1;
@@ -149,7 +191,12 @@ hci_h4_sm_w4_header(struct hci_h4_sm *h4sm, struct hci_h4_input_buffer *ib)
             }
         }
 
-        assert(h4sm->allocs && h4sm->allocs->evt);
+        if (!h4sm->allocs || !h4sm->allocs->evt) {
+            return -1;
+        }
+        if (h4sm->hdr[1] + 2 > MYNEWT_VAL(BLE_TRANSPORT_EVT_SIZE)) {
+            return -1;                          /* would overflow the event buffer */
+        }
 
         /* We can drop legacy advertising events if there's no free buffer in
          * discardable pool.
@@ -170,7 +217,9 @@ hci_h4_sm_w4_header(struct hci_h4_sm *h4sm, struct hci_h4_input_buffer *ib)
         h4sm->exp_len = h4sm->hdr[1] + 2;
         break;
     case HCI_H4_ISO:
-        assert(h4sm->allocs && h4sm->allocs->iso);
+        if (!h4sm->allocs || !h4sm->allocs->iso) {
+            return -1;                          /* no ISO on this side: sync loss */
+        }
         h4sm->om = h4sm->allocs->iso();
         if (!h4sm->om) {
             return -1;
@@ -290,7 +339,13 @@ hci_h4_sm_rx(struct hci_h4_sm *h4sm, const uint8_t *buf, uint16_t len)
             break;
         case HCI_H4_SM_W4_HEADER:
             rc = hci_h4_sm_w4_header(h4sm, &ib);
-            assert(rc >= 0);
+            if (rc < 0) {
+                /* the header-stage allocation failed or was refused */
+                hci_h4_sm_drop(h4sm);
+                h4sm->state = HCI_H4_SM_W4_PKT_TYPE;
+                rc = 0;
+                break;
+            }
             if (rc) {
                 break;
             }
@@ -298,7 +353,12 @@ hci_h4_sm_rx(struct hci_h4_sm *h4sm, const uint8_t *buf, uint16_t len)
         /* no break */
         case HCI_H4_SM_W4_PAYLOAD:
             rc = hci_h4_sm_w4_payload(h4sm, &ib);
-            assert(rc >= 0);
+            if (rc < 0) {
+                hci_h4_sm_drop(h4sm);
+                h4sm->state = HCI_H4_SM_W4_PKT_TYPE;
+                rc = 0;
+                break;
+            }
             if (rc) {
                 break;
             }
