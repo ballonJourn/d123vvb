@@ -8,6 +8,8 @@ import { UUID as BNP } from './bnp_sender.js';
 const $ = (id) => document.getElementById(id);
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// let the UI and other tasks run without a timer (not throttled in background tabs)
+const yieldTask = () => new Promise((r) => { const c = new MessageChannel(); c.port1.onmessage = () => { c.port1.close(); r(); }; c.port2.postMessage(0); });
 const dec = new TextDecoder();
 
 function log(msg, err = false) {
@@ -190,11 +192,19 @@ const chart = new Chart($('chart'), {
 });
 
 // ---------------------------------------------------------------- writes
+// No timers in the send path: in a background tab Chrome stretches every
+// setTimeout to >= 1 s, which turned a 4 ms back-off into seconds per picture.
+// When Chrome's write-without-response queue is full, send that packet with a
+// write request instead: it resolves on the ATT response and paces the
+// stream by itself.
 async function writeA7(u8) {
   if ($('wmode').value === 'r') return st.chr.AAA7.writeValueWithResponse(u8);
-  for (let i = 0; ; i++) {              // Chrome rejects when its queue is full: back off
-    try { return await st.chr.AAA7.writeValueWithoutResponse(u8); }
-    catch (e) { if (!st.connected || i > 40) throw e; await sleep(4); }
+  try {
+    return await st.chr.AAA7.writeValueWithoutResponse(u8);
+  } catch (e) {
+    if (!st.connected) throw e;
+    st.paced = (st.paced || 0) + 1;
+    return st.chr.AAA7.writeValueWithResponse(u8);
   }
 }
 
@@ -239,6 +249,11 @@ async function sendPicture() {
   const t = (performance.now() - t0) / 1000;
   st.pics++;
   $('sPics').textContent = st.pics;
+  const now = performance.now();
+  st.times = (st.times || []).concat(now).slice(-11);
+  if (st.times.length > 1)
+    $('sFps').textContent = ((st.times.length - 1) * 1000 / (now - st.times[0])).toFixed(2);
+  $('sPaced').textContent = st.paced || 0;
   chart.data.labels.push(String(st.pics));
   chart.data.datasets[0].data.push(+(jpeg.length / 1024 / t).toFixed(1));
   if (chart.data.labels.length > 60) { chart.data.labels.shift(); chart.data.datasets[0].data.shift(); }
@@ -272,9 +287,12 @@ $('btnLoop').onclick = async () => {
   st.loop = true; $('btnStop').disabled = false;
   log('开始连续发送（模拟导航刷新）');
   while (st.loop && st.connected) {
+    const t0 = performance.now();
     await guarded(sendPicture);
     $('btnStop').disabled = false;
-    await sleep(+$('interval').value || 0);
+    const wait = (+$('interval').value || 0) - (performance.now() - t0);
+    if (wait > 0) await sleep(wait);   // interval = picture period; 0 = as fast as the link allows
+    else await yieldTask();
   }
   st.loop = false; setLinked(st.connected);
   log('连续发送已停止');
@@ -289,6 +307,11 @@ $('file').onchange = async (e) => {
   renderPreview();
 };
 for (const id of ['nStep', 'nRoad']) $(id).oninput = () => renderPreview();
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && st.loop)
+    log('网页切到后台：Chrome 会把定时器拉到 ≥1 秒，间隔 > 0 时实际帧率会下降；间隔设 0 不受影响', true);
+});
 
 renderPreview(1);
 setLinked(false);

@@ -34,7 +34,7 @@ const record = (u, v) => { const u8 = new Uint8Array(v.buffer ? v.buffer.slice(v
 const enc = new TextEncoder();
 const ey = (s) => { const j = enc.encode(s); const o = new Uint8Array(6 + j.length); o[0] = 69; o[1] = 89; o[5] = j.length; o.set(j, 6); return o; };
 const dv = (u8) => new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
-let writesNoRsp = 0, writesRsp = 0;
+let writesNoRsp = 0, writesRsp = 0, nrCalls = 0;
 class Chr {
   constructor(u, val) { this.u = u; this.val = val; this.l = []; }
   async readValue() { return dv(this.val()); }
@@ -42,7 +42,10 @@ class Chr {
   addEventListener(_, f) { this.l.push(f); }
   notify(u8) { for (const f of this.l) f({ target: { value: dv(u8) } }); }
   async writeValueWithResponse(v) { writesRsp++; return this.write(v); }
-  async writeValueWithoutResponse(v) { writesNoRsp++; return this.write(v); }
+  async writeValueWithoutResponse(v) {
+    if (this.u === 0xaaa7 && ++nrCalls % 5 === 0) throw new Error('GATT operation already in progress');  // queue full
+    writesNoRsp++; return this.write(v);
+  }
   async write(v) {
     if (v.byteLength > 512) throw new Error('write > 512');
     record(this.u, v);
@@ -99,6 +102,8 @@ await until(() => logText().includes('连续发送已停止'));
 $('ntype').value = '2'; $('btnNavi').click();
 await until(() => (logText().match(/写 AAA8/g) || []).length === 2);
 check($('sFail').textContent === '0', 'no write failures');
+check(+$('sPaced').textContent > 0, 'queue-full writes fell back to write-with-response: ' + $('sPaced').textContent);
+check(/^\d+\.\d\d$/.test($('sFps').textContent), 'fps shown: ' + $('sFps').textContent);
 
 writeFileSync(process.argv[2] || '/tmp/erya_ui_writes.bin', Buffer.concat(rec.map((u) => Buffer.from(u))));
 writeFileSync(process.argv[3] || '/tmp/erya_ui_last.jpg', lastJpeg);
