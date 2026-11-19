@@ -15,6 +15,8 @@
 #include "mpp_fb.h"
 #include "mpp_ge.h"
 #include "mpp_decoder.h"
+#include "mpp_dec_type.h"
+#include "frame_allocator.h"
 #include "disp_sink.h"
 #include "ble_service.h"
 
@@ -137,7 +139,39 @@ static enum mpp_pixel_format jpeg_out_fmt(void)
 /* decode a JPEG with the VE, hand the decoded frame to use(), release it */
 typedef int (*frame_use_fn)(struct mpp_buf *fb, const struct bir_frame *f);
 
+/* external output frame: the VE decodes straight into a caller buffer */
+struct ext_alloc {
+    struct frame_allocator base;
+    struct mpp_frame *frame;
+};
+static int ext_alloc_frame(struct frame_allocator *p, struct mpp_frame *frame,
+                           int width, int height, enum mpp_pixel_format format)
+{
+    (void)width; (void)height; (void)format;
+    memcpy(frame, ((struct ext_alloc *)p)->frame, sizeof(*frame));
+    return 0;
+}
+static int ext_free_frame(struct frame_allocator *p, struct mpp_frame *frame)
+{
+    (void)p; (void)frame;
+    return 0;                                  /* buffer belongs to the caller */
+}
+static int ext_close(struct frame_allocator *p)
+{
+    (void)p;
+    return 0;                                  /* static object */
+}
+static struct alloc_ops s_ext_ops = { ext_alloc_frame, ext_free_frame, ext_close };
+
+static int jpeg_decode_ex(const struct bir_frame *f, struct mpp_frame *ext, frame_use_fn use);
+#ifndef BLE_NAVI_DISP_LVGL
 static int jpeg_decode(const struct bir_frame *f, frame_use_fn use)
+{
+    return jpeg_decode_ex(f, NULL, use);
+}
+#endif
+
+static int jpeg_decode_ex(const struct bir_frame *f, struct mpp_frame *ext, frame_use_fn use)
 {
     if (f->len < 4 || f->data[0] != 0xFF || f->data[1] != 0xD8) {
         rt_kprintf("[disp] not a JPEG (no FFD8), %u bytes\n", f->len);
@@ -157,6 +191,14 @@ static int jpeg_decode(const struct bir_frame *f, frame_use_fn use)
         return -1;
     }
     int ret = -1;
+    static struct ext_alloc s_ext;
+    if (ext) {
+        /* same order as lvgl_v9/lv_drivers/lv_mpp_dec/lv_mpp_dec.c */
+        s_ext.base.ops = &s_ext_ops;
+        s_ext.frame = ext;
+        cfg.pix_fmt = ext->buf.format;
+        mpp_decoder_control(dec, MPP_DEC_INIT_CMD_SET_EXT_FRAME_ALLOCATOR, &s_ext.base);
+    }
     if (mpp_decoder_init(dec, &cfg) < 0) {
         rt_kprintf("[disp] decoder init failed (out fmt %d, %u bytes)\n", cfg.pix_fmt, f->len);
         goto out;
@@ -303,62 +345,47 @@ int disp_sink_init(void)
 struct lv_layer_img {
     lv_obj_t      *img;
     lv_image_dsc_t dsc;
-    uint8_t       *buf;
+    uint8_t       *raw;            /* as allocated                   */
+    uint8_t       *buf;            /* cache-line aligned inside raw  */
     uint32_t       cap;
-    int            mem;            /* MEM_DEFAULT or MEM_CMA */
 };
 static struct lv_layer_img s_lv[BIR_NUM_LAYERS];
 static int s_lv_attached;
 
+#define ALIGN16(x) (((x) + 15u) & ~15u)
+
 /*
- * One buffer per layer is enough: it is written and drawn by the same (LVGL)
- * thread, so LVGL never renders a half-copied picture. Taken from the normal
- * PSRAM heap first: the CMA pool also holds both framebuffers, the LVGL image
- * cache and the VE frames, and ran out ("no CMA for 800x480 picture"). D133
- * has no MMU, so heap memory is physically contiguous for GE as well.
+ * One buffer per layer, reused for every picture: the VE decodes straight
+ * into it (external frame allocator) and LVGL draws from it, both in the
+ * LVGL thread, so no second 750 KB copy is needed. Allocated like
+ * lv_mpp_dec.c does, with aicos_malloc_try_cma(): when CMA is short it drops
+ * LVGL cached images until the buffer fits ("no memory for a 800x480
+ * picture" before). Must run in the LVGL thread, which it does.
  */
 static uint8_t *lv_layer_buf(struct lv_layer_img *L, uint32_t need)
 {
     if (L->cap >= need)
         return L->buf;
-    if (L->buf) {
+    if (L->raw) {
         lv_image_cache_drop(&L->dsc);
-        aicos_free_align(L->mem, L->buf);
-        L->buf = NULL;
+        aicos_free(MEM_CMA, L->raw);
+        L->raw = L->buf = NULL;
         L->cap = 0;
     }
-    L->mem = MEM_DEFAULT;
-    L->buf = aicos_malloc_align(MEM_DEFAULT, need, CACHE_LINE_SIZE);
-    if (!L->buf) {
-        L->mem = MEM_CMA;
-        L->buf = aicos_malloc_align(MEM_CMA, need, CACHE_LINE_SIZE);
-    }
-    if (L->buf) {
-        L->cap = need;
-        rt_kprintf("[disp] picture buffer %u KB from %s heap\n", need / 1024,
-                   L->mem == MEM_CMA ? "CMA" : "PSRAM");
-    }
+    L->raw = aicos_malloc_try_cma(need + CACHE_LINE_SIZE - 1);
+    if (!L->raw)
+        return NULL;
+    L->buf = (uint8_t *)(((uintptr_t)L->raw + CACHE_LINE_SIZE - 1) & ~(uintptr_t)(CACHE_LINE_SIZE - 1));
+    L->cap = need;
+    rt_kprintf("[disp] picture buffer %u KB (CMA, shared with the LVGL image cache)\n",
+               need / 1024);
     return L->buf;
 }
 
-/* copy RGB565 rows into the layer's spare buffer and show it */
-static int lv_show_rgb565(const uint8_t *px, uint32_t src_stride, uint16_t w, uint16_t h,
-                          const struct bir_frame *f)
+/* point the layer's lv_image at its buffer (w x h, stride bytes per row) */
+static void lv_layer_present(struct lv_layer_img *L, const struct bir_frame *f,
+                             uint16_t w, uint16_t h, uint32_t stride)
 {
-    uint8_t layer = f->layer < BIR_NUM_LAYERS ? f->layer : 0;
-    struct lv_layer_img *L = &s_lv[layer];
-    uint32_t t = now_ms(), stride = (uint32_t)w * 2, need = stride * h;
-    lv_image_cache_drop(&L->dsc);                  /* old content of this buffer */
-    uint8_t *dst = lv_layer_buf(L, need);
-    if (!dst) {
-        rt_kprintf("[disp] no memory for a %ux%u picture (%u KB) in PSRAM heap or CMA\n",
-                   w, h, need / 1024);
-        return -1;
-    }
-    for (uint32_t y = 0; y < h; y++)
-        memcpy(dst + y * stride, px + y * src_stride, stride);
-    aicos_dcache_clean_range(dst, need);           /* LVGL may draw it with GE */
-
     lv_image_dsc_t *d = &L->dsc;
     memset(d, 0, sizeof(*d));
     d->header.magic = LV_IMAGE_HEADER_MAGIC;
@@ -366,8 +393,8 @@ static int lv_show_rgb565(const uint8_t *px, uint32_t src_stride, uint16_t w, ui
     d->header.w = w;
     d->header.h = h;
     d->header.stride = stride;
-    d->data_size = need;
-    d->data = dst;
+    d->data_size = stride * h;
+    d->data = L->buf;
 
     if (!L->img) {
         L->img = lv_image_create(lv_layer_top());
@@ -383,21 +410,90 @@ static int lv_show_rgb565(const uint8_t *px, uint32_t src_stride, uint16_t w, ui
     }
     lv_obj_remove_flag(L->img, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(L->img);
+}
+
+/* JPEG width/height from the SOFn segment */
+static int jpeg_size(const uint8_t *p, uint32_t n, uint16_t *w, uint16_t *h)
+{
+    uint32_t i = 2;
+    while (i + 9 < n) {
+        if (p[i] != 0xFF) { i++; continue; }
+        uint8_t m = p[i + 1];
+        if (m == 0xFF) { i++; continue; }
+        if (m == 0xD8 || (m >= 0xD0 && m <= 0xD7) || m == 0x01) { i += 2; continue; }
+        uint32_t len = ((uint32_t)p[i + 2] << 8) | p[i + 3];
+        if (m >= 0xC0 && m <= 0xCF && m != 0xC4 && m != 0xC8 && m != 0xCC) {
+            *h = (uint16_t)((p[i + 5] << 8) | p[i + 6]);
+            *w = (uint16_t)((p[i + 7] << 8) | p[i + 8]);
+            return (*w && *h) ? 0 : -1;
+        }
+        i += 2 + len;
+    }
+    return -1;
+}
+
+static int lv_use_inplace(struct mpp_buf *fb, const struct bir_frame *f)
+{
+    uint8_t layer = f->layer < BIR_NUM_LAYERS ? f->layer : 0;
+    struct lv_layer_img *L = &s_lv[layer];
+    if (fb->phy_addr[0] != (uintptr_t)L->buf) {
+        rt_kprintf("[disp] VE ignored the external buffer\n");
+        return -1;
+    }
+    uint32_t t = now_ms();
+    uint16_t h = fb->size.height;
+    aicos_dcache_invalid_range((void *)L->buf, fb->stride[0] * ALIGN16(h));  /* VE wrote it */
+    lv_layer_present(L, f, fb->size.width, h, fb->stride[0]);
     s_st.last_blit_ms = now_ms() - t;
     return 0;
 }
 
-static int lv_use_decoded(struct mpp_buf *fb, const struct bir_frame *f)
+static int lv_show_jpeg(const struct bir_frame *f)
 {
-    if (fb->format != MPP_FMT_RGB_565) {
-        rt_kprintf("[disp] decoded fmt %d, LVGL mode expects RGB565\n", fb->format);
+    uint16_t w, h;
+    if (jpeg_size(f->data, f->len, &w, &h)) {
+        rt_kprintf("[disp] JPEG without SOF (size unknown)\n");
         return -1;
     }
-    uint16_t w = fb->crop_en ? fb->crop.width : fb->size.width;
-    uint16_t h = fb->crop_en ? fb->crop.height : fb->size.height;
-    const uint8_t *px = (const uint8_t *)(uintptr_t)fb->phy_addr[0];   /* D133: VA == PA */
-    aicos_dcache_invalid_range((void *)px, fb->stride[0] * h);          /* VE wrote it */
-    return lv_show_rgb565(px, fb->stride[0], w, h, f);
+    uint8_t layer = f->layer < BIR_NUM_LAYERS ? f->layer : 0;
+    struct lv_layer_img *L = &s_lv[layer];
+    uint32_t stride = ALIGN16(w) * 2, need = stride * ALIGN16(h);   /* lv_set_frame_buf_size */
+    lv_image_cache_drop(&L->dsc);
+    if (!lv_layer_buf(L, need)) {
+        rt_kprintf("[disp] no CMA for a %ux%u picture (%u KB) even after dropping the LVGL "
+                   "image cache\n", w, h, need / 1024);
+        return -1;
+    }
+    aicos_dcache_clean_invalid_range((void *)L->buf, need);
+    static struct mpp_frame ext;
+    memset(&ext, 0, sizeof(ext));
+    ext.buf.buf_type = MPP_PHY_ADDR;
+    ext.buf.format = MPP_FMT_RGB_565;
+    ext.buf.size.width = w;
+    ext.buf.size.height = h;
+    ext.buf.stride[0] = stride;
+    ext.buf.phy_addr[0] = (unsigned int)(uintptr_t)L->buf;           /* D133: VA == PA */
+    return jpeg_decode_ex(f, &ext, lv_use_inplace);
+}
+
+/* copy RGB565 rows into the layer's spare buffer and show it */
+static int lv_show_rgb565(const uint8_t *px, uint32_t src_stride, uint16_t w, uint16_t h,
+                          const struct bir_frame *f)
+{
+    uint8_t layer = f->layer < BIR_NUM_LAYERS ? f->layer : 0;
+    struct lv_layer_img *L = &s_lv[layer];
+    uint32_t t = now_ms(), stride = (uint32_t)w * 2, need = stride * h;
+    lv_image_cache_drop(&L->dsc);
+    if (!lv_layer_buf(L, need)) {
+        rt_kprintf("[disp] no CMA for a %ux%u picture (%u KB)\n", w, h, need / 1024);
+        return -1;
+    }
+    for (uint32_t y = 0; y < h; y++)
+        memcpy(L->buf + y * stride, px + y * src_stride, stride);
+    aicos_dcache_clean_range(L->buf, need);        /* LVGL may draw it with GE */
+    lv_layer_present(L, f, w, h, stride);
+    s_st.last_blit_ms = now_ms() - t;
+    return 0;
 }
 
 static void handle(struct disp_msg *m)
@@ -408,7 +504,7 @@ static void handle(struct disp_msg *m)
     switch (f->fmt) {
     case BNP_FMT_JPEG:
         s_st.jpeg++;
-        ret = jpeg_decode(f, lv_use_decoded);
+        ret = lv_show_jpeg(f);
         break;
     case BNP_FMT_RGB565:
         s_st.rgb++;
