@@ -348,6 +348,7 @@ struct lv_layer_img {
     uint8_t       *raw;            /* as allocated                   */
     uint8_t       *buf;            /* cache-line aligned inside raw  */
     uint32_t       cap;
+    int            mem;            /* heap raw came from             */
 };
 static struct lv_layer_img s_lv[BIR_NUM_LAYERS];
 static int s_lv_attached;
@@ -357,10 +358,13 @@ static int s_lv_attached;
 /*
  * One buffer per layer, reused for every picture: the VE decodes straight
  * into it (external frame allocator) and LVGL draws from it, both in the
- * LVGL thread, so no second 750 KB copy is needed. Allocated like
- * lv_mpp_dec.c does, with aicos_malloc_try_cma(): when CMA is short it drops
- * LVGL cached images until the buffer fits ("no memory for a 800x480
- * picture" before). Must run in the LVGL thread, which it does.
+ * LVGL thread. It comes from heap_psram_sw (MEM_PSRAM_SW): on demo88 the CMA
+ * pool is 3.9 MB with ~186 KB left once the framebuffers and the LVGL image
+ * cache are in, so a 750 KB buffer there starves LVGL ("lv_mpp_dec_open:
+ * Invalid status"), while heap_psram_sw (8 MB) is unused. D133 has no MMU:
+ * the buffer is physically contiguous for the VE and GE; caches are handled
+ * around the decode. CMA (aicos_malloc_try_cma) only as a fallback.
+ * Allocated on the first picture, never at boot.
  */
 static uint8_t *lv_layer_buf(struct lv_layer_img *L, uint32_t need)
 {
@@ -368,17 +372,24 @@ static uint8_t *lv_layer_buf(struct lv_layer_img *L, uint32_t need)
         return L->buf;
     if (L->raw) {
         lv_image_cache_drop(&L->dsc);
-        aicos_free(MEM_CMA, L->raw);
+        aicos_free(L->mem, L->raw);
         L->raw = L->buf = NULL;
         L->cap = 0;
     }
-    L->raw = aicos_malloc_try_cma(need + CACHE_LINE_SIZE - 1);
+#ifdef AIC_PSRAM_SW_EN
+    L->mem = MEM_PSRAM_SW;
+    L->raw = aicos_malloc(MEM_PSRAM_SW, need + CACHE_LINE_SIZE - 1);
+#endif
+    if (!L->raw) {
+        L->mem = MEM_CMA;
+        L->raw = aicos_malloc_try_cma(need + CACHE_LINE_SIZE - 1);
+    }
     if (!L->raw)
         return NULL;
     L->buf = (uint8_t *)(((uintptr_t)L->raw + CACHE_LINE_SIZE - 1) & ~(uintptr_t)(CACHE_LINE_SIZE - 1));
     L->cap = need;
-    rt_kprintf("[disp] picture buffer %u KB (CMA, shared with the LVGL image cache)\n",
-               need / 1024);
+    rt_kprintf("[disp] picture buffer %u KB from %s\n", need / 1024,
+               L->mem == MEM_CMA ? "heap_cma (fallback)" : "heap_psram_sw");
     return L->buf;
 }
 
@@ -460,8 +471,8 @@ static int lv_show_jpeg(const struct bir_frame *f)
     uint32_t stride = ALIGN16(w) * 2, need = stride * ALIGN16(h);   /* lv_set_frame_buf_size */
     lv_image_cache_drop(&L->dsc);
     if (!lv_layer_buf(L, need)) {
-        rt_kprintf("[disp] no CMA for a %ux%u picture (%u KB) even after dropping the LVGL "
-                   "image cache\n", w, h, need / 1024);
+        rt_kprintf("[disp] no memory for a %ux%u picture (%u KB) in heap_psram_sw or CMA\n",
+                   w, h, need / 1024);
         return -1;
     }
     aicos_dcache_clean_invalid_range((void *)L->buf, need);
@@ -485,7 +496,7 @@ static int lv_show_rgb565(const uint8_t *px, uint32_t src_stride, uint16_t w, ui
     uint32_t t = now_ms(), stride = (uint32_t)w * 2, need = stride * h;
     lv_image_cache_drop(&L->dsc);
     if (!lv_layer_buf(L, need)) {
-        rt_kprintf("[disp] no CMA for a %ux%u picture (%u KB)\n", w, h, need / 1024);
+        rt_kprintf("[disp] no memory for a %ux%u picture (%u KB)\n", w, h, need / 1024);
         return -1;
     }
     for (uint32_t y = 0; y < h; y++)
