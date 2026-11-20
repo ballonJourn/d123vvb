@@ -12,11 +12,13 @@ CONFIG_AIC_FS_IMAGE_DIR_1="data/"
 CONFIG_AIC_FS_IMAGE_NAME_1="data.lfs"
 CONFIG_LVGL_V_9=y
 CONFIG_LPKG_LVGL_THREAD_STACK_SIZE=32768
-CONFIG_AIC_LVGL_DEMO=y
+# 8 MB test board: no demo UI. Any demo with a full-screen background image
+# and an animation keeps the CMA pool full; the navigation picture then evicts
+# the background and LVGL fails to re-decode it on every frame. Production
+# boards (32 MB) run the real UI.
+# CONFIG_AIC_LVGL_DEMO is not set
+CONFIG_LPKG_USING_LVGL=y
 # CONFIG_HCN_D123BBV_DEMO is not set
-# 8 MB test board: light demo UI (demo_hub fonts/images ~1 MB, and its arc image
-# no longer fits CMA next to the navigation picture). Production (32 MB) uses its own UI.
-CONFIG_AIC_LVGL_BASE_DEMO=y
 CONFIG_LV_COLOR_DEPTH=16
 CONFIG_LV_CACHE_IMG_NUM=8
 CONFIG_AIC_USING_UART0=y
