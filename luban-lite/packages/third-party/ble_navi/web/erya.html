@@ -107,6 +107,7 @@ dd.ok { color: var(--ok); } dd.bad { color: var(--lost); }
       <label>每次写入字节（MTU−3）<input id="maxw" type="number" min="20" max="512" value="244"></label>
       <label>AAA7 写入方式
         <select id="wmode"><option value="nr">无响应写（快）</option><option value="r">有响应写（稳）</option></select></label>
+      <label>确认间隔（包，参照 EPD-nRF5，0 = 只确认每张最后一包）<input id="ackEvery" type="number" min="0" max="500" value="50"></label>
       <div class="row">
         <button id="btnConnect" class="primary">连接 EY_ 设备</button>
         <button id="btnDisconnect" disabled>断开</button>
@@ -176,8 +177,9 @@ dd.ok { color: var(--ok); } dd.bad { color: var(--lost); }
         <div><b id="sTime">–</b><span>本张用时 s</span></div>
         <div><b id="sPics">0</b><span>已发图片</span></div>
         <div><b id="sFail">0</b><span>写入失败</span></div>
-        <div><b id="sFps">–</b><span>帧率 fps（近 10 张）</span></div>
+        <div><b id="sFps">–</b><span>送达帧率 fps（近 10 张，以设备确认为准）</span></div>
         <div><b id="sPaced">0</b><span>队列满改用应答写</span></div>
+        <div><b id="sAcked">0</b><span>确认写（每 N 包 + 每张末包）</span></div>
       </div>
     </section>
     <section aria-label="每张图的写入速率">

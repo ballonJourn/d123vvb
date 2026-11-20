@@ -225,9 +225,21 @@ async function sendPicture() {
 
   const t0 = performance.now();
   let done = 0, last = 0;
+  // EPD-nRF5 html/js/main.js writeImage(): a write request every
+  // `interleavedcount` packets (default 50) paces the sender on the peer's
+  // acknowledgement. The last packet of each picture is also a write request:
+  // ATT is in order, so its response means the whole picture reached the
+  // board, and the fps below is delivered pictures, not writes queued in
+  // the OS (Windows resolves write-without-response when queued).
+  const ackEvery = Math.max(0, +$('ackEvery').value || 0);
   for (let i = 0; i < sum; i++) {
     try {
-      for (const w of writes[i]) await writeA7(w);
+      const confirm = i === sum - 1 || (ackEvery > 0 && (i + 1) % ackEvery === 0);
+      const ws = writes[i];
+      for (let k = 0; k < ws.length; k++) {
+        if (confirm && k === ws.length - 1) { await st.chr.AAA7.writeValueWithResponse(ws[k]); st.acked = (st.acked || 0) + 1; }
+        else await writeA7(ws[k]);
+      }
       map.set(i, 1);
     } catch (e) {
       map.set(i, 2); st.fails++; $('sFail').textContent = st.fails;
@@ -254,6 +266,7 @@ async function sendPicture() {
   if (st.times.length > 1)
     $('sFps').textContent = ((st.times.length - 1) * 1000 / (now - st.times[0])).toFixed(2);
   $('sPaced').textContent = st.paced || 0;
+  $('sAcked').textContent = st.acked || 0;
   chart.data.labels.push(String(st.pics));
   chart.data.datasets[0].data.push(+(jpeg.length / 1024 / t).toFixed(1));
   if (chart.data.labels.length > 60) { chart.data.labels.shift(); chart.data.datasets[0].data.shift(); }

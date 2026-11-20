@@ -103,6 +103,8 @@ $('ntype').value = '2'; $('btnNavi').click();
 await until(() => (logText().match(/写 AAA8/g) || []).length === 2);
 check($('sFail').textContent === '0', 'no write failures');
 check(+$('sPaced').textContent > 0, 'queue-full writes fell back to write-with-response: ' + $('sPaced').textContent);
+check(+$('sAcked').textContent >= +$('sPics').textContent,
+      'every picture ends with a confirmed write (acked ' + $('sAcked').textContent + ', pictures ' + $('sPics').textContent + ')');
 check(/^\d+\.\d\d$/.test($('sFps').textContent), 'fps shown: ' + $('sFps').textContent);
 
 writeFileSync(process.argv[2] || '/tmp/erya_ui_writes.bin', Buffer.concat(rec.map((u) => Buffer.from(u))));
