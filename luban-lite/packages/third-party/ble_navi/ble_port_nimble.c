@@ -21,6 +21,7 @@
 
 #include "nimble/ble.h"
 #include "host/ble_hs.h"
+#include "nimble/nimble_port.h"
 #include "host/util/util.h"
 #include "services/gap/ble_svc_gap.h"
 #include "services/gatt/ble_svc_gatt.h"
@@ -235,20 +236,83 @@ void ble_port_refresh_link(struct ble_navi_link *l)
 
 static void advertise(void);
 
+/*
+ * Link tuning, staged. Phones run their own LL procedures right after the
+ * connection (connection update, MTU exchange, discovery). Firing our PHY
+ * update and connection parameter request at the same moment made two
+ * "instant" procedures collide: with an Android phone the link died 1-2 s
+ * after every connect (disconnect 0x208 = HCI 0x08 connection timeout,
+ * "conn update st=520"), before the app read AAA5. Windows did not hit it.
+ *   connect           : data length only (no instant)
+ *   +LINK_TUNE_DELAY  : 2M PHY request
+ *   PHY done / +1 s   : connection parameter request
+ * At most one instant-based procedure of ours is pending at any time.
+ */
+#ifndef BLE_NAVI_LINK_TUNE_DELAY_MS
+#define BLE_NAVI_LINK_TUNE_DELAY_MS 2000
+#endif
+enum { TUNE_IDLE, TUNE_WAIT, TUNE_PHY, TUNE_DONE };
+static struct ble_npl_callout s_tune_co;
+static int s_tune_stage = TUNE_IDLE;
+static uint16_t s_tune_conn = BLE_HS_CONN_HANDLE_NONE;
+static int s_tune_inited;
+
+static void tune_conn_params(void)
+{
+    s_tune_stage = TUNE_DONE;
+    uint16_t ci = BLE_NAVI_CONN_INTERVAL_MS * 4 / 5; /* ms -> 1.25ms units */
+    int rc = ble_port_request_conn(ci, ci, 0, 400);
+    rt_kprintf("[nimble] link tune: conn interval %u ms request rc=%d\n",
+               BLE_NAVI_CONN_INTERVAL_MS, rc);
+}
+
+static void tune_step(struct ble_npl_event *ev)
+{
+    (void)ev;
+    if (s_tune_conn == BLE_HS_CONN_HANDLE_NONE || s_conn != s_tune_conn)
+        return;
+    if (s_tune_stage == TUNE_WAIT) {
+        s_tune_stage = TUNE_PHY;
+        int rc = ble_gap_set_prefered_le_phy(s_tune_conn, BLE_GAP_LE_PHY_2M_MASK,
+                                             BLE_GAP_LE_PHY_2M_MASK, BLE_GAP_LE_PHY_CODED_ANY);
+        rt_kprintf("[nimble] link tune: 2M PHY request rc=%d\n", rc);
+        if (rc) {
+            tune_conn_params();
+            return;
+        }
+        /* no PHY event within 1 s (peer ignores it): go on anyway */
+        ble_npl_callout_reset(&s_tune_co, ble_npl_time_ms_to_ticks32(1000));
+    } else if (s_tune_stage == TUNE_PHY) {
+        tune_conn_params();
+    }
+}
+
 static void tune_link(uint16_t conn)
 {
-    int rc;
-    /* DLE: 251 octets, 2120 us = 251B on 1M PHY (spec max). Controller may cap. */
-    rc = ble_gap_set_data_len(conn, 251, 2120);
+    if (!s_tune_inited) {
+        ble_npl_callout_init(&s_tune_co, nimble_port_get_dflt_eventq(), tune_step, NULL);
+        s_tune_inited = 1;
+    }
+    /* DLE: 251 octets, 2120 us = 251B on 1M PHY (spec max). No instant. */
+    int rc = ble_gap_set_data_len(conn, 251, 2120);
     if (rc) rt_kprintf("[nimble] set_data_len rc=%d\n", rc);
-    rc = ble_gap_set_prefered_le_phy(conn, BLE_GAP_LE_PHY_2M_MASK, BLE_GAP_LE_PHY_2M_MASK,
-                                     BLE_GAP_LE_PHY_CODED_ANY);
-    if (rc) rt_kprintf("[nimble] set 2M phy rc=%d\n", rc);
-    uint16_t ci = BLE_NAVI_CONN_INTERVAL_MS * 4 / 5; /* ms -> 1.25ms units */
-    rc = ble_port_request_conn(ci, ci, 0, 400);
-    if (rc) rt_kprintf("[nimble] conn update rc=%d\n", rc);
     g_ble_navi.link.max_tx_octets = 251;
     g_ble_navi.link.max_rx_octets = 251;
+
+    s_tune_conn = conn;
+    s_tune_stage = TUNE_WAIT;
+    if (BLE_NAVI_LINK_TUNE_DELAY_MS == 0)
+        tune_step(NULL);
+    else
+        ble_npl_callout_reset(&s_tune_co, ble_npl_time_ms_to_ticks32(BLE_NAVI_LINK_TUNE_DELAY_MS));
+}
+
+static void tune_stop(void)
+{
+    s_tune_conn = BLE_HS_CONN_HANDLE_NONE;
+    s_tune_stage = TUNE_IDLE;
+    if (s_tune_inited)
+        ble_npl_callout_stop(&s_tune_co);
 }
 
 static int gap_event(struct ble_gap_event *ev, void *arg)
@@ -266,6 +330,7 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
         break;
     case BLE_GAP_EVENT_DISCONNECT:
         rt_kprintf("[nimble] disconnect reason=0x%x\n", ev->disconnect.reason);
+        tune_stop();
         s_conn = BLE_HS_CONN_HANDLE_NONE;
         ble_navi_on_disconnect();
         advertise();
@@ -281,7 +346,12 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
     case BLE_GAP_EVENT_PHY_UPDATE_COMPLETE:
         s_tx_phy = ev->phy_updated.tx_phy;
         s_rx_phy = ev->phy_updated.rx_phy;
-        rt_kprintf("[nimble] phy tx=%u rx=%u\n", s_tx_phy, s_rx_phy);
+        rt_kprintf("[nimble] phy tx=%u rx=%u (status %d)\n", s_tx_phy, s_rx_phy,
+                   ev->phy_updated.status);
+        if (s_tune_stage == TUNE_PHY) {           /* our PHY step finished */
+            ble_npl_callout_stop(&s_tune_co);
+            tune_conn_params();
+        }
         break;
     case BLE_GAP_EVENT_SUBSCRIBE:
         if (ev->subscribe.attr_handle == s_chronos_tx_handle && ev->subscribe.cur_notify)

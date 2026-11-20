@@ -46,6 +46,16 @@ config BLE_NAVI_CONN_INTERVAL_MS
     range 8 100
     default 15
 
+config BLE_NAVI_LINK_TUNE_DELAY_MS
+    int "Wait after connect before PHY / connection parameter requests (ms)"
+    range 0 10000
+    default 2000
+    help
+      Phones start their own link procedures right after connecting. Our
+      2M PHY and connection parameter requests are sent after this delay
+      and one after the other. 0 = immediately (the old behaviour, which
+      dropped Android links with HCI 0x08 connection timeout).
+
 config BLE_NAVI_MAX_FRAME_BYTES
     int "Largest accepted frame (bytes, CMA)"
     default 1228800
