@@ -40,8 +40,8 @@ static rt_mq_t       s_mq;
 #ifndef BLE_NAVI_DISP_LVGL
 static struct mpp_fb *s_fb;
 static struct mpp_ge *s_ge;
-#endif
 static struct aicfb_screeninfo s_info;
+#endif
 static struct {
     uint32_t frames, jpeg, rgb, icon, drops, errors;
     uint32_t last_decode_ms, last_blit_ms;
@@ -586,9 +586,7 @@ void ble_navi_lv_attach(void)
 
 int disp_sink_init(void)
 {
-#if LV_COLOR_DEPTH == 16
-    s_info.format = MPP_FMT_RGB_565;               /* VE output = LVGL RGB565 */
-#else
+#if LV_COLOR_DEPTH != 16     /* lv_mpp_dec decodes to the LVGL colour format; RGB565 copies assume 16 bit */
 #error "BLE_NAVI_DISP_LVGL: only LV_COLOR_DEPTH 16 is implemented"
 #endif
     if (!s_mq)
