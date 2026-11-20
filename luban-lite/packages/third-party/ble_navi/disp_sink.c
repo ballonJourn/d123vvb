@@ -112,6 +112,7 @@ static int show_raw(const struct bir_frame *f, enum mpp_pixel_format fmt, uint32
 
 #endif /* !BLE_NAVI_DISP_LVGL */
 
+#ifndef BLE_NAVI_DISP_LVGL   /* LVGL mode decodes JPEG through lv_mpp_dec */
 /*
  * VE output format for JPEG. D13x GE cannot bitblt from YUV ("bitblt not
  * support yuv format, except src format yuv400"), so let the VE convert:
@@ -138,7 +139,6 @@ static enum mpp_pixel_format jpeg_out_fmt(void)
 
 /* decode a JPEG with the VE, hand the decoded frame to use(), release it */
 typedef int (*frame_use_fn)(struct mpp_buf *fb, const struct bir_frame *f);
-
 /* external output frame: the VE decodes straight into a caller buffer */
 struct ext_alloc {
     struct frame_allocator base;
@@ -164,12 +164,10 @@ static int ext_close(struct frame_allocator *p)
 static struct alloc_ops s_ext_ops = { ext_alloc_frame, ext_free_frame, ext_close };
 
 static int jpeg_decode_ex(const struct bir_frame *f, struct mpp_frame *ext, frame_use_fn use);
-#ifndef BLE_NAVI_DISP_LVGL
 static int jpeg_decode(const struct bir_frame *f, frame_use_fn use)
 {
     return jpeg_decode_ex(f, NULL, use);
 }
-#endif
 
 static int jpeg_decode_ex(const struct bir_frame *f, struct mpp_frame *ext, frame_use_fn use)
 {
@@ -240,6 +238,7 @@ out:
     mpp_decoder_destory(dec);
     return ret;
 }
+#endif /* !BLE_NAVI_DISP_LVGL */
 
 #ifndef BLE_NAVI_DISP_LVGL
 /* width/height in the frame = target size on screen (0 = native) */
@@ -348,6 +347,11 @@ struct lv_layer_img {
     uint8_t       *raw;            /* as allocated                   */
     uint8_t       *buf;            /* cache-line aligned inside raw  */
     uint32_t       cap;
+    /* JPEG shown through LVGL's own decoder (lv_mpp_dec): two descriptors
+     * used in turn, each keeping its JPEG bytes alive while it is the src */
+    lv_image_dsc_t jdsc[2];
+    uint8_t       *jbuf[2];
+    int            jcur;           /* -1 = none yet */
 };
 static struct lv_layer_img s_lv[BIR_NUM_LAYERS];
 static int s_lv_attached;
@@ -436,24 +440,19 @@ static int jpeg_size(const uint8_t *p, uint32_t n, uint16_t *w, uint16_t *h)
     return -1;
 }
 
-static int lv_use_inplace(struct mpp_buf *fb, const struct bir_frame *f)
+/*
+ * JPEG -> lv_image with the JPEG bytes as an LV_COLOR_FORMAT_RAW variable
+ * source: ArtInChip's lv_mpp_dec decodes it on the VE (lv_mpp_dec_info /
+ * lv_mpp_dec_open, LV_IMAGE_SRC_VARIABLE) into LVGL's image cache, so the
+ * decoded picture is allocated, evicted and re-decoded by LVGL like every
+ * other UI image. No private CMA buffer and no VE use of ours: a persistent
+ * 270 KB buffer taken with aicos_malloc_try_cma() evicted the UI's images
+ * and fragmented CMA, after which LVGL failed to decode them every frame.
+ * Takes ownership of f->data (freed when the next picture replaces it).
+ */
+static int lv_show_jpeg_src(struct disp_msg *m)
 {
-    uint8_t layer = f->layer < BIR_NUM_LAYERS ? f->layer : 0;
-    struct lv_layer_img *L = &s_lv[layer];
-    if (fb->phy_addr[0] != (uintptr_t)L->buf) {
-        rt_kprintf("[disp] VE ignored the external buffer\n");
-        return -1;
-    }
-    uint32_t t = now_ms();
-    uint16_t h = fb->size.height;
-    aicos_dcache_invalid_range((void *)L->buf, fb->stride[0] * ALIGN16(h));  /* VE wrote it */
-    lv_layer_present(L, f, fb->size.width, h, fb->stride[0]);
-    s_st.last_blit_ms = now_ms() - t;
-    return 0;
-}
-
-static int lv_show_jpeg(const struct bir_frame *f)
-{
+    const struct bir_frame *f = &m->f;
     uint16_t w, h;
     if (jpeg_size(f->data, f->len, &w, &h)) {
         rt_kprintf("[disp] JPEG without SOF (size unknown)\n");
@@ -461,23 +460,44 @@ static int lv_show_jpeg(const struct bir_frame *f)
     }
     uint8_t layer = f->layer < BIR_NUM_LAYERS ? f->layer : 0;
     struct lv_layer_img *L = &s_lv[layer];
-    uint32_t stride = ALIGN16(w) * 2, need = stride * ALIGN16(h);   /* lv_set_frame_buf_size */
-    lv_image_cache_drop(&L->dsc);
-    if (!lv_layer_buf(L, need)) {
-        rt_kprintf("[disp] no CMA for a %ux%u picture (%u KB) even after dropping the LVGL "
-                   "image cache\n", w, h, need / 1024);
-        return -1;
+    uint32_t t = now_ms();
+    int prev = L->jcur, next = (prev == 0) ? 1 : 0;
+
+    lv_image_dsc_t *d = &L->jdsc[next];
+    memset(d, 0, sizeof(*d));
+    d->header.magic = LV_IMAGE_HEADER_MAGIC;
+    d->header.cf = LV_COLOR_FORMAT_RAW;
+    d->header.w = w;
+    d->header.h = h;
+    d->data_size = f->len;
+    d->data = f->data;
+    L->jbuf[next] = (uint8_t *)f->data;
+    m->own_buf = 0;                            /* kept while it is the src */
+    L->jcur = next;
+
+    if (!L->img) {
+        L->img = lv_image_create(lv_layer_top());
+        lv_obj_remove_flag(L->img, LV_OBJ_FLAG_CLICKABLE);
     }
-    aicos_dcache_clean_invalid_range((void *)L->buf, need);
-    static struct mpp_frame ext;
-    memset(&ext, 0, sizeof(ext));
-    ext.buf.buf_type = MPP_PHY_ADDR;
-    ext.buf.format = MPP_FMT_RGB_565;
-    ext.buf.size.width = w;
-    ext.buf.size.height = h;
-    ext.buf.stride[0] = stride;
-    ext.buf.phy_addr[0] = (unsigned int)(uintptr_t)L->buf;           /* D133: VA == PA */
-    return jpeg_decode_ex(f, &ext, lv_use_inplace);
+    lv_image_set_src(L->img, d);
+    lv_obj_set_pos(L->img, f->x, f->y);
+    if (f->width && f->height && (f->width != w || f->height != h)) {
+        lv_obj_set_size(L->img, f->width, f->height);
+        lv_image_set_inner_align(L->img, LV_IMAGE_ALIGN_STRETCH);
+    } else {
+        lv_obj_set_size(L->img, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    }
+    lv_obj_remove_flag(L->img, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(L->img);
+
+    if (prev >= 0 && L->jbuf[prev]) {          /* old picture no longer referenced */
+        lv_image_cache_drop(&L->jdsc[prev]);
+        aicos_free_align(MEM_CMA, L->jbuf[prev]);
+        L->jbuf[prev] = NULL;
+    }
+    s_st.last_blit_ms = now_ms() - t;
+    rt_kprintf("[disp] JPEG %ux%u -> LVGL image (lv_mpp_dec) at (%d,%d)\n", w, h, f->x, f->y);
+    return 0;
 }
 
 /* copy RGB565 rows into the layer's spare buffer and show it */
@@ -508,7 +528,7 @@ static void handle(struct disp_msg *m)
     switch (f->fmt) {
     case BNP_FMT_JPEG:
         s_st.jpeg++;
-        ret = lv_show_jpeg(f);
+        ret = lv_show_jpeg_src(m);
         break;
     case BNP_FMT_RGB565:
         s_st.rgb++;
@@ -558,6 +578,8 @@ void ble_navi_lv_attach(void)
     if (!s_mq)
         s_mq = rt_mq_create("disp", sizeof(struct disp_msg), DISP_QUEUE_DEPTH, RT_IPC_FLAG_FIFO);
     lv_timer_create(lv_poll, LV_POLL_MS, NULL);
+    for (int i = 0; i < BIR_NUM_LAYERS; i++)
+        s_lv[i].jcur = -1;
     s_lv_attached = 1;
     rt_kprintf("[disp] LVGL top layer attached\n");
 }
