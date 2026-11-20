@@ -33,7 +33,8 @@ int main(int argc, char **argv)
     struct erya e;
     struct erya_cfg cfg = { .pic_w = 800, .pic_h = 480, .pic_q = 160, .max_pic_bytes = 512 * 1024 };
     strcpy(cfg.mac, "CCC4B2B64DA0"); strcpy(cfg.pic_type, "420");
-    struct erya_ops ops = { n_notify, n_alloc, n_free, n_now, n_pic, n_navi, NULL };
+    struct erya_ops ops = { .notify = n_notify, .alloc = n_alloc, .free = n_free, .now_ms = n_now,
+                            .on_picture = n_pic, .on_navi = n_navi, .ctx = NULL };
     erya_init(&e, &cfg, &ops);
     erya_on_connect(&e);
     uint8_t hdr[4], buf[65536]; unsigned writes = 0, maxw = 0;

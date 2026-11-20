@@ -9,6 +9,9 @@
  *   AAA6  device -> phone : EY frame {"fun":"pic","w","h","q","type"}
  *   AAA7  phone -> device : EB frame {"fun":"pic","num","sum","size"} + JPEG piece
  *   AAA8  phone -> device : EY frame {"fun":"navi","type","data":{...}}
+ * Seen from the 领骑摩托 app, not in Ver 1.2 (phone -> device on AAA6):
+ *         EY {"fun":"time","data":{"timeZone":"8","timestamp":"<UTC s>"}}
+ *         EY {"fun":"activate","type":"<n>"}   (2 seen with an empty key)
  * Framing (AAA6..AAA8):
  *   "EY" | u32 BE n | n bytes UTF-8 JSON
  *   "EB" | u32 BE n | u32 BE m | n bytes JSON | m bytes binary
@@ -57,6 +60,7 @@ struct erya_stats {
     uint32_t frames_ey, frames_eb, bad_magic, json_err, json_too_long;
     uint32_t pics_ok, pics_lost, pics_too_big, pics_alloc_fail, pkts;
     uint32_t navi_msgs, bytes_rx, last_pic_bytes, last_pic_ms;
+    uint32_t time_msgs, activate_msgs, unknown_fun;
 };
 
 struct erya_ops {
@@ -68,6 +72,9 @@ struct erya_ops {
     /* a complete JPEG; ownership of buf passes to the callee */
     void  (*on_picture)(void *ctx, uint8_t *buf, uint32_t len);
     void  (*on_navi)(void *ctx, const struct nav_state *ns);
+    /* undocumented app messages on AAA6 (may be NULL) */
+    void  (*on_time)(void *ctx, uint32_t utc, int tz_hours);
+    void  (*on_activate)(void *ctx, int type);
     void  *ctx;
 };
 
@@ -82,7 +89,7 @@ struct erya_cfg {
 struct erya {
     struct erya_cfg   cfg;
     struct erya_ops   ops;
-    struct erya_stream s7, s8;
+    struct erya_stream s6, s7, s8;
     int      phone;            /* enum erya_phone                          */
     uint8_t  connected, mac_published;
     /* picture being assembled */
@@ -94,6 +101,9 @@ struct erya {
     uint8_t  pkt_accept;       /* current EB belongs to the picture         */
     uint32_t pkt_num;
     struct nav_state nav;
+    int      activate;         /* last "activate" type, -1 = none yet      */
+    uint32_t time_utc;         /* last "time" message, 0 = none yet        */
+    int      time_tz;
     struct erya_stats st;
 };
 
@@ -112,6 +122,10 @@ uint32_t erya_frame_ey(const char *json, uint8_t *out, uint32_t cap);
 /* JSON hooks: implemented on top of cJSON (erya_json.c) */
 int erya_json_pic(const char *json, uint32_t *num, uint32_t *sum, uint32_t *size);
 int erya_json_navi(const char *json, struct nav_state *ns);
+/* "fun" of an EY message into out; returns 0 if present */
+int erya_json_fun(const char *json, char *out, size_t cap);
+int erya_json_time(const char *json, uint32_t *utc, int *tz_hours);
+int erya_json_activate(const char *json, int *type);
 
 #ifdef __cplusplus
 }

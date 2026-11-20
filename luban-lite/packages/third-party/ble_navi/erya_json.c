@@ -123,3 +123,47 @@ int erya_json_navi(const char *json, struct nav_state *ns)
     cJSON_Delete(root);
     return 0;
 }
+
+int erya_json_fun(const char *json, char *out, size_t cap)
+{
+    cJSON *root = cJSON_Parse(json);
+    const cJSON *f = root ? cJSON_GetObjectItemCaseSensitive(root, "fun") : NULL;
+    int rc = -1;
+    if (cJSON_IsString(f) && f->valuestring) {
+        snprintf(out, cap, "%s", f->valuestring);
+        rc = 0;
+    }
+    cJSON_Delete(root);
+    return rc;
+}
+
+/* {"fun":"time","data":{"timeZone":"8","timestamp":"1795140207"}} */
+int erya_json_time(const char *json, uint32_t *utc, int *tz_hours)
+{
+    cJSON *root = cJSON_Parse(json);
+    const cJSON *d = root ? cJSON_GetObjectItemCaseSensitive(root, "data") : NULL;
+    int rc = -1;
+    uint32_t ts;
+    char tz[16];
+    if (cJSON_IsObject(d) && get_u32(d, "timestamp", &ts) == 0) {
+        *utc = ts;
+        *tz_hours = (get_text(d, "timeZone", tz, sizeof(tz)) == 0) ? atoi(tz) : 0;
+        rc = 0;
+    }
+    cJSON_Delete(root);
+    return rc;
+}
+
+/* {"fun":"activate","type":"2"} */
+int erya_json_activate(const char *json, int *type)
+{
+    cJSON *root = cJSON_Parse(json);
+    uint32_t t;
+    int rc = -1;
+    if (root && get_u32(root, "type", &t) == 0) {
+        *type = (int)t;
+        rc = 0;
+    }
+    cJSON_Delete(root);
+    return rc;
+}

@@ -206,3 +206,5 @@ CONFIG_BLE_NAVI_BACKEND_NIMBLE=y
 # hci_uart_rx above LVGL (20) so the 1.5 Mbps HCI uart never overflows during UI work
 CONFIG_LPKG_NIMBLE_HCI_UART_RX_THREAD_PRIORITY=9
 CONFIG_LPKG_NIMBLE_HCI_UART_RX_BUFSZ=4096
+# 尔雅 debug model key (debug phase only; replace with the production key before release)
+CONFIG_BLE_NAVI_ERYA_MODEL_KEY="EYMOTOR12FCB99FD224DB2B22F5A7703"

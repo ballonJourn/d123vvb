@@ -8,6 +8,7 @@
 #include "ble_service.h"
 #include "disp_sink.h"
 #include <rtdevice.h>
+#include <time.h>
 
 #ifndef BLE_NAVI_MAX_FRAME_BYTES
 #define BLE_NAVI_MAX_FRAME_BYTES (1024 * 600 * 2)  /* demo88 panel */
@@ -143,6 +144,32 @@ static void erya_navi(void *ctx, const struct nav_state *ns)
     disp_sink_nav(ns);
 }
 
+/* {"fun":"time"}: UTC seconds + time zone hours -> RTC (UTC) */
+static void erya_time(void *ctx, uint32_t utc, int tz)
+{
+    (void)ctx;
+#ifdef RT_USING_RTC
+    rt_err_t rc = set_timestamp((time_t)utc);
+#else
+    int rc = -1;
+#endif
+    time_t lt = (time_t)utc + (time_t)tz * 3600;
+    struct tm tmv;
+    gmtime_r(&lt, &tmv);
+    rt_kprintf("[erya] time sync from phone: %04d-%02d-%02d %02d:%02d:%02d (UTC%+d), rtc %s\n",
+               tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday, tmv.tm_hour, tmv.tm_min,
+               tmv.tm_sec, tz, rc == 0 ? "set" : "NOT set");
+}
+
+/* {"fun":"activate","type":n}: meaning not documented in Ver 1.2; with an
+ * empty model key the app sent type 2 and showed "device not activated" */
+static void erya_activate(void *ctx, int type)
+{
+    (void)ctx;
+    rt_kprintf("[erya] ===== activate type=%d from the app%s =====\n", type,
+               type == 2 ? " (seen with an empty/unknown key: not activated)" : "");
+}
+
 static void erya_setup(void)
 {
     struct erya_cfg cfg;
@@ -154,9 +181,12 @@ static void erya_setup(void)
     cfg.pic_q = BLE_NAVI_ERYA_PIC_Q;
     rt_strncpy(cfg.pic_type, BLE_NAVI_ERYA_PIC_TYPE, sizeof(cfg.pic_type) - 1);
     cfg.max_pic_bytes = BLE_NAVI_ERYA_MAX_PIC_BYTES;
-    struct erya_ops ops = { erya_notify, ops_alloc, ops_free, ops_now,
-                            erya_picture, erya_navi, NULL };
+    struct erya_ops ops = { .notify = erya_notify, .alloc = ops_alloc, .free = ops_free,
+                            .now_ms = ops_now, .on_picture = erya_picture, .on_navi = erya_navi,
+                            .on_time = erya_time, .on_activate = erya_activate, .ctx = NULL };
     erya_init(&g_ble_navi.erya, &cfg, &ops);
+    rt_kprintf("[erya] model key %s (AAA5 = <MAC>&<key>)\n",
+               cfg.model_key[0] ? "set" : "EMPTY");
     if (!cfg.model_key[0])
         rt_kprintf("[erya] BLE_NAVI_ERYA_MODEL_KEY is empty: the app may refuse the "
                    "device until 尔雅 issues a 车型 key\n");
@@ -440,6 +470,9 @@ static int cmd_ble_navi(int argc, char **argv)
                    e->st.pics_alloc_fail, e->st.pkts, e->st.last_pic_bytes, e->st.last_pic_ms,
                    e->st.navi_msgs, e->st.frames_ey, e->st.frames_eb, e->st.bad_magic,
                    e->st.json_err);
+        rt_kprintf("erya activate=%d (msgs %u) time_utc=%u tz=%d (msgs %u) unknown_fun=%u key=%s\n",
+                   e->activate, e->st.activate_msgs, e->time_utc, e->time_tz, e->st.time_msgs,
+                   e->st.unknown_fun, e->cfg.model_key[0] ? "set" : "EMPTY");
     }
 #endif
 #if defined(LPKG_NIMBLE_HCI_H4)

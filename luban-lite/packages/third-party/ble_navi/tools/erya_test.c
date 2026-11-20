@@ -28,14 +28,20 @@ static void d_pic(void *c, uint8_t *b, uint32_t n)
 { (void)c; if (got_pic) frees++; free(got_pic); got_pic = b; got_len = n; pics++; }
 static void d_navi(void *c, const struct nav_state *ns) { (void)c; got_nav = *ns; navs++; }
 
+static uint32_t got_utc; static int got_tz = -99, got_act = -1, times, acts;
+static void d_time(void *c, uint32_t u, int tz) { (void)c; got_utc = u; got_tz = tz; times++; }
+static void d_act(void *c, int t) { (void)c; got_act = t; acts++; }
+
 static struct erya E;
 static void dev_init(void)
 {
     struct erya_cfg cfg = { .pic_w = 800, .pic_h = 480, .pic_q = 160, .max_pic_bytes = 512 * 1024 };
-    strcpy(cfg.mac, "6C21A22E66B8");
-    strcpy(cfg.model_key, "abcdefgabcdefgabcdefgabcdefg");
+    strcpy(cfg.mac, "CCC4B2B64DA0");
+    strcpy(cfg.model_key, "EYMOTOR12FCB99FD224DB2B22F5A7703");
     strcpy(cfg.pic_type, "420");
-    struct erya_ops ops = { d_notify, d_alloc, d_free, d_now, d_pic, d_navi, NULL };
+    struct erya_ops ops = { .notify = d_notify, .alloc = d_alloc, .free = d_free, .now_ms = d_now,
+                            .on_picture = d_pic, .on_navi = d_navi, .on_time = d_time,
+                            .on_activate = d_act, .ctx = NULL };
     erya_init(&E, &cfg, &ops);
 }
 
@@ -104,7 +110,7 @@ int main(int argc, char **argv)
     CHECK(n == 1 && buf[0] == '0', "AAA5 before connect = '0'");
     erya_on_connect(&E);
     n = erya_read(&E, 0xAAA5, buf, sizeof(buf)); buf[n] = 0;
-    CHECK(!strcmp((char *)buf, "6C21A22E66B8&abcdefgabcdefgabcdefgabcdefg"), "AAA5 mac&key: %s", buf);
+    CHECK(!strcmp((char *)buf, "CCC4B2B64DA0&EYMOTOR12FCB99FD224DB2B22F5A7703"), "AAA5 mac&key: %s", buf);
     uint8_t android = 0x00;
     erya_on_write(&E, 0xAAA5, &android, 1);
     CHECK(E.phone == ERYA_PHONE_ANDROID, "phone type android");
@@ -133,6 +139,17 @@ int main(int argc, char **argv)
     L = mk_ey("{\"fun\":\"navi\",\"type\":2}", buf);
     erya_on_write(&E, 0xAAA8, buf, L);
     CHECK(navs == 2 && !got_nav.active, "navi end");
+
+    /* 2b. undocumented app messages on AAA6, as sent by the iPhone app */
+    L = mk_ey("{\"fun\":\"time\",\"data\":{\"timeZone\":\"8\",\"timestamp\":\"1795140207\"}}", buf);
+    write_stream(0xAAA6, buf, L, 1);
+    CHECK(times == 1 && got_utc == 1795140207u && got_tz == 8, "time sync %u tz %d", got_utc, got_tz);
+    L = mk_ey("{\"fun\":\"activate\",\"type\":\"2\"}", buf);
+    erya_on_write(&E, 0xAAA6, buf, L);
+    CHECK(acts == 1 && got_act == 2 && E.activate == 2, "activate type %d", got_act);
+    L = mk_ey("{\"fun\":\"whatever\"}", buf);
+    erya_on_write(&E, 0xAAA6, buf, L);
+    CHECK(E.st.unknown_fun == 1 && E.st.json_err == 0, "unknown fun counted, not an error");
 
     /* 3. picture, one EB per write at MTU 247 */
     uint32_t sl, pk;

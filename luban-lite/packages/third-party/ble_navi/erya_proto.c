@@ -97,6 +97,8 @@ void erya_init(struct erya *e, const struct erya_cfg *cfg, const struct erya_ops
     e->ops = *ops;
     e->phone = ERYA_PHONE_UNKNOWN;
     e->pic_next = -1;
+    e->activate = -1;
+    stream_reset(&e->s6);
     stream_reset(&e->s7);
     stream_reset(&e->s8);
 }
@@ -106,6 +108,7 @@ void erya_on_connect(struct erya *e)
     e->connected = 1;
     e->mac_published = 1;   /* step 3: device publishes "<mac>&<key>" on AAA5 */
     e->phone = ERYA_PHONE_UNKNOWN;
+    stream_reset(&e->s6);
     stream_reset(&e->s7);
     stream_reset(&e->s8);
 }
@@ -116,6 +119,7 @@ void erya_on_disconnect(struct erya *e)
     e->mac_published = 0;
     pic_abort(e, 1);
     pic_free(e);
+    stream_reset(&e->s6);
     stream_reset(&e->s7);
     stream_reset(&e->s8);
 }
@@ -215,14 +219,45 @@ static void frame_json_done(struct erya *e, struct erya_stream *s)
         return;
     }
     e->st.frames_ey++;
-    struct nav_state ns = e->nav;
-    if (erya_json_navi(s->json, &ns) == 0) {
-        e->nav = ns;
-        e->st.navi_msgs++;
-        if (e->ops.on_navi)
-            e->ops.on_navi(e->ops.ctx, &e->nav);
-    } else {
+    char fun[16];
+    if (erya_json_fun(s->json, fun, sizeof(fun))) {
         e->st.json_err++;
+        return;
+    }
+    if (!strcmp(fun, "navi")) {
+        struct nav_state ns = e->nav;
+        if (erya_json_navi(s->json, &ns) == 0) {
+            e->nav = ns;
+            e->st.navi_msgs++;
+            if (e->ops.on_navi)
+                e->ops.on_navi(e->ops.ctx, &e->nav);
+        } else {
+            e->st.json_err++;
+        }
+    } else if (!strcmp(fun, "time")) {
+        uint32_t utc;
+        int tz;
+        if (erya_json_time(s->json, &utc, &tz) == 0) {
+            e->time_utc = utc;
+            e->time_tz = tz;
+            e->st.time_msgs++;
+            if (e->ops.on_time)
+                e->ops.on_time(e->ops.ctx, utc, tz);
+        } else {
+            e->st.json_err++;
+        }
+    } else if (!strcmp(fun, "activate")) {
+        int type;
+        if (erya_json_activate(s->json, &type) == 0) {
+            e->activate = type;
+            e->st.activate_msgs++;
+            if (e->ops.on_activate)
+                e->ops.on_activate(e->ops.ctx, type);
+        } else {
+            e->st.json_err++;
+        }
+    } else {
+        e->st.unknown_fun++;
     }
 }
 
@@ -306,6 +341,9 @@ void erya_on_write(struct erya *e, uint16_t uuid, const uint8_t *b, uint16_t n)
             notify(e, ERYA_UUID_AAA4, ble_only, 2);
             send_pic_format(e);     /* 手机投屏流程 1: 设置导航图片格式 */
         }
+        break;
+    case ERYA_UUID_AAA6:            /* app: time / activate (not in Ver 1.2) */
+        stream_feed(e, &e->s6, b, n);
         break;
     case ERYA_UUID_AAA7:
         stream_feed(e, &e->s7, b, n);
