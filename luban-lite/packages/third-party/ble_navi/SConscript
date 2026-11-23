@@ -22,5 +22,16 @@ if GetDepend(['BLE_NAVI_ERYA']):
 if GetDepend(['BLE_NAVI_BACKEND_NIMBLE']):
     src += ['ble_port_nimble.c']
 
-group = DefineGroup('ble_navi', src, depend=['LPKG_USING_BLE_NAVI'], CPPPATH=path)
+defs = []
+if GetDepend(['BLE_NAVI_BACKEND_NIMBLE']):
+    # syscfg.h guards the macro with #ifndef: the vendor file stays untouched.
+    # An old .config without the symbol has no BuildOptions entry.
+    try:
+        blocks = int(GetConfigValue('BLE_NAVI_MSYS_BLOCKS'))
+    except (KeyError, ValueError):
+        blocks = 0
+    if blocks:
+        defs += ['MYNEWT_VAL_MSYS_1_BLOCK_COUNT=%d' % blocks]
+
+group = DefineGroup('ble_navi', src, depend=['LPKG_USING_BLE_NAVI'], CPPPATH=path, CPPDEFINES=defs)
 Return('group')

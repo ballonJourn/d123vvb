@@ -55,6 +55,16 @@ config BLE_NAVI_CONN_CE_FULL
       interval); NimBLE's own default is 0. Whether the AIC8800 controller
       honours it is unknown: switch off to compare.
 
+config BLE_NAVI_MSYS_BLOCKS
+    int "NimBLE mbuf blocks (MYNEWT_VAL_MSYS_1_BLOCK_COUNT)"
+    range 12 120
+    default 40
+    help
+      SDK default is 12 blocks of 292 bytes, esp-idf's throughput_app uses
+      50. A received ACL PDU holds one block until the host has processed
+      it; when none is free hci_h4 drops the frame, and an ATT write without
+      response that is dropped is lost for good. 40 blocks = 11.4 KB.
+
 config BLE_NAVI_LINK_TUNE_DELAY_MS
     int "Wait after connect before PHY / connection parameter requests (ms)"
     range 0 10000
