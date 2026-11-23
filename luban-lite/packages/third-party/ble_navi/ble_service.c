@@ -47,7 +47,7 @@ static void ops_free(void *ctx, void *p)
 static uint32_t ops_now(void *ctx)
 {
     (void)ctx;
-    return (uint32_t)(rt_tick_get() * 1000 / RT_TICK_PER_SECOND);
+    return (uint32_t)rt_tick_get_millisecond();   /* tick * 1000 overflowed 32 bit every 71.6 min */
 }
 static int ops_frame(void *ctx, const struct bir_frame *f)
 {
