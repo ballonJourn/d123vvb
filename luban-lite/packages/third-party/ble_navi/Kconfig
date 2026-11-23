@@ -76,6 +76,16 @@ config BLE_NAVI_CONN_L2CAP_FALLBACK
       connection parameter update request (slave role), and the result is
       logged. Switch off to compare.
 
+config BLE_NAVI_CONN_INTERVAL_MIN_MS
+    int "Lowest connection interval offered (ms, 0 = only the one above)"
+    range 0 100
+    default 0
+    help
+      With 0 the request is exactly BLE_NAVI_CONN_INTERVAL_MS (min = max), as
+      before. A value here sends a range, e.g. 8 (7.5 ms, the Core spec
+      minimum) with BLE_NAVI_CONN_INTERVAL_MS 15: the phone may then pick any
+      interval in between instead of having to accept exactly one.
+
 config BLE_NAVI_LINK_TUNE_DELAY_MS
     int "Wait after connect before PHY / connection parameter requests (ms)"
     range 0 10000

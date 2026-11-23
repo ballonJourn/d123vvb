@@ -27,6 +27,9 @@
 #include "services/gatt/ble_svc_gatt.h"
 #include "ble_service.h"
 
+#ifndef BLE_NAVI_CONN_INTERVAL_MIN_MS
+#define BLE_NAVI_CONN_INTERVAL_MIN_MS 0
+#endif
 #ifdef BLE_NAVI_CONN_CE_FULL           /* Kconfig bool: defined (empty) when y */
 #define BNI_MAX_CE_LEN 0xFFFF
 #else
@@ -287,10 +290,16 @@ static int s_tune_inited;
 static void tune_conn_params(void)
 {
     s_tune_stage = TUNE_DONE;
-    uint16_t ci = BLE_NAVI_CONN_INTERVAL_MS * 4 / 5; /* ms -> 1.25ms units */
-    int rc = ble_port_request_conn(ci, ci, 0, 400);
-    rt_kprintf("[nimble] link tune: conn interval %u ms request rc=%d\n",
-               BLE_NAVI_CONN_INTERVAL_MS, rc);
+    uint16_t ci_max = BLE_NAVI_CONN_INTERVAL_MS * 4 / 5; /* ms -> 1.25ms units */
+    uint16_t ci_min = BLE_NAVI_CONN_INTERVAL_MIN_MS ? BLE_NAVI_CONN_INTERVAL_MIN_MS * 4 / 5
+                                                    : ci_max;
+    if (ci_min < 6)                      /* 7.5 ms, the Core spec minimum */
+        ci_min = 6;
+    if (ci_min > ci_max)
+        ci_min = ci_max;
+    int rc = ble_port_request_conn(ci_min, ci_max, 0, 400);
+    rt_kprintf("[nimble] link tune: conn interval %u..%u (x1.25 ms) request rc=%d\n",
+               ci_min, ci_max, rc);
 }
 
 static void tune_step(struct ble_npl_event *ev)
