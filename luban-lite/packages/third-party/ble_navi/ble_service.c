@@ -119,6 +119,10 @@ static int erya_notify(void *ctx, uint16_t uuid, const uint8_t *b, uint16_t n)
     erya_log_value(rc ? "notify FAILED" : "notify ->phone", uuid, b, n);
     return rc;
 }
+/* msh "ble_navi nodisp on": pictures are received and logged but not shown,
+ * to tell the link speed from the cost of decoding / drawing them */
+static volatile uint8_t s_nodisp;
+
 static void erya_picture(void *ctx, uint8_t *buf, uint32_t len)
 {
     (void)ctx;
@@ -143,6 +147,10 @@ static void erya_picture(void *ctx, uint8_t *buf, uint32_t len)
                  (len > 3 && buf[0] == 0xFF && buf[1] == 0xD8) ? "SOI ok" : "NO SOI (not a JPEG?)");
     }
 #endif
+    if (s_nodisp) {
+        ops_free(NULL, buf);
+        return;
+    }
     disp_sink_submit_owned(&f);         /* sink frees buf */
 }
 static void erya_navi(void *ctx, const struct nav_state *ns)
@@ -458,6 +466,13 @@ static int cmd_ble_navi(int argc, char **argv)
         psram_alias_check();
         return 0;
     }
+#ifdef BLE_NAVI_ERYA
+    if (argc >= 3 && !strcmp(argv[1], "nodisp")) {
+        s_nodisp = !strcmp(argv[2], "on");
+        rt_kprintf("erya pictures are %s\n", s_nodisp ? "received only, NOT shown" : "shown");
+        return 0;
+    }
+#endif
     struct bir_stats *s = &b->rx.st;
     ble_port_refresh_link(&b->link);
     rt_kprintf("conn=0x%04x mtu=%u ci=%u*1.25ms lat=%u to=%u*10ms phy=%u/%u dle=%u/%u backend=%u\n",
@@ -477,6 +492,7 @@ static int cmd_ble_navi(int argc, char **argv)
                    e->st.pics_alloc_fail, e->st.pkts, e->st.last_pic_bytes, e->st.last_pic_ms,
                    e->st.navi_msgs, e->st.frames_ey, e->st.frames_eb, e->st.bad_magic,
                    e->st.json_err);
+        rt_kprintf("erya display: %s\n", s_nodisp ? "OFF (ble_navi nodisp off to restore)" : "on");
         rt_kprintf("erya activate=%d (msgs %u) time_utc=%u tz=%d (msgs %u) unknown_fun=%u key=%s\n",
                    e->activate, e->st.activate_msgs, e->time_utc, e->time_tz, e->st.time_msgs,
                    e->st.unknown_fun, e->cfg.model_key[0] ? "set" : "EMPTY");
@@ -491,4 +507,4 @@ static int cmd_ble_navi(int argc, char **argv)
     disp_sink_dump_stats();
     return 0;
 }
-MSH_CMD_EXPORT_ALIAS(cmd_ble_navi, ble_navi, ble_navi [start|psram] - BLE navigation image receiver);
+MSH_CMD_EXPORT_ALIAS(cmd_ble_navi, ble_navi, ble_navi [start|psram|nodisp on|off] - BLE navigation image receiver);
