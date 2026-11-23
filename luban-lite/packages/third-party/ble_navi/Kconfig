@@ -46,6 +46,15 @@ config BLE_NAVI_CONN_INTERVAL_MS
     range 8 100
     default 15
 
+config BLE_NAVI_CONN_CE_FULL
+    bool "Request full-length connection events (max_ce_len 0xFFFF)"
+    default y
+    help
+      Put in the connection parameter request. esp-idf's NimBLE
+      throughput_app does the same (its comment: use the entire connection
+      interval); NimBLE's own default is 0. Whether the AIC8800 controller
+      honours it is unknown: switch off to compare.
+
 config BLE_NAVI_LINK_TUNE_DELAY_MS
     int "Wait after connect before PHY / connection parameter requests (ms)"
     range 0 10000

@@ -27,6 +27,11 @@
 #include "services/gatt/ble_svc_gatt.h"
 #include "ble_service.h"
 
+#ifdef BLE_NAVI_CONN_CE_FULL           /* Kconfig bool: defined (empty) when y */
+#define BNI_MAX_CE_LEN 0xFFFF
+#else
+#define BNI_MAX_CE_LEN 0
+#endif
 #ifndef BLE_NAVI_PREF_MTU
 #define BLE_NAVI_PREF_MTU 247
 #endif
@@ -209,7 +214,8 @@ int ble_port_request_conn(uint16_t min_ci, uint16_t max_ci, uint16_t lat, uint16
         return BLE_HS_ENOTCONN;
     struct ble_gap_upd_params p = {
         .itvl_min = min_ci, .itvl_max = max_ci, .latency = lat,
-        .supervision_timeout = to, .min_ce_len = 0, .max_ce_len = 0,
+        .supervision_timeout = to, .min_ce_len = 0,
+        .max_ce_len = BNI_MAX_CE_LEN,       /* esp-idf throughput_app: 0xFFFF */
     };
     return ble_gap_update_params(s_conn, &p);
 }
