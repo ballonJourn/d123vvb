@@ -211,3 +211,8 @@ CONFIG_LPKG_NIMBLE_HCI_UART_RX_THREAD_PRIORITY=9
 CONFIG_LPKG_NIMBLE_HCI_UART_RX_BUFSZ=4096
 # 尔雅 debug model key (debug phase only; replace with the production key before release)
 CONFIG_BLE_NAVI_ERYA_MODEL_KEY="EYMOTOR12FCB99FD224DB2B22F5A7703"
+# A/B test: link parameters as on 2026-11-20 (Huawei ~50 KB/s then, 8..16 KB/s
+# with these on). Remove this block to go back to the Kconfig defaults.
+# CONFIG_BLE_NAVI_CONN_CE_FULL is not set
+# CONFIG_BLE_NAVI_CONN_L2CAP_FALLBACK is not set
+CONFIG_BLE_NAVI_CONN_INTERVAL_MIN_MS=0
