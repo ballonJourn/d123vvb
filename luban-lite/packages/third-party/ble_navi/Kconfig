@@ -65,6 +65,17 @@ config BLE_NAVI_MSYS_BLOCKS
       it; when none is free hci_h4 drops the frame, and an ATT write without
       response that is dropped is lost for good. 40 blocks = 11.4 KB.
 
+config BLE_NAVI_CONN_L2CAP_FALLBACK
+    bool "Retry a refused connection parameter request through L2CAP"
+    default y
+    help
+      Boards logs show our LL connection parameter request answered with
+      HCI 0x3B (unacceptable connection parameters) by the phone; the 15 ms
+      interval that ends up in use is set by the phone itself some seconds
+      later. When this happens the same parameters are sent once as an L2CAP
+      connection parameter update request (slave role), and the result is
+      logged. Switch off to compare.
+
 config BLE_NAVI_LINK_TUNE_DELAY_MS
     int "Wait after connect before PHY / connection parameter requests (ms)"
     range 0 10000

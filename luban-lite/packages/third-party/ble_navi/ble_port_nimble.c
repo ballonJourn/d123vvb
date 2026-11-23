@@ -32,6 +32,18 @@
 #else
 #define BNI_MAX_CE_LEN 0
 #endif
+#ifdef BLE_NAVI_CONN_L2CAP_FALLBACK    /* Kconfig bool */
+static struct ble_gap_upd_params s_req;   /* last ble_port_request_conn() */
+static uint8_t s_req_pending;             /* its CONN_UPDATE event is still due */
+static uint8_t s_req_l2cap_tried;         /* one L2CAP retry per connection */
+
+static void l2cap_upd_cb(uint16_t conn, int status, void *arg)
+{
+    (void)conn; (void)arg;
+    rt_kprintf("[nimble] link tune: L2CAP conn param update %s (status %d)\n",
+               status == 0 ? "accepted" : "rejected", status);
+}
+#endif
 #ifndef BLE_NAVI_PREF_MTU
 #define BLE_NAVI_PREF_MTU 247
 #endif
@@ -217,7 +229,16 @@ int ble_port_request_conn(uint16_t min_ci, uint16_t max_ci, uint16_t lat, uint16
         .supervision_timeout = to, .min_ce_len = 0,
         .max_ce_len = BNI_MAX_CE_LEN,       /* esp-idf throughput_app: 0xFFFF */
     };
-    return ble_gap_update_params(s_conn, &p);
+#ifdef BLE_NAVI_CONN_L2CAP_FALLBACK
+    s_req = p;
+    s_req_pending = 1;
+#endif
+    int rc = ble_gap_update_params(s_conn, &p);
+#ifdef BLE_NAVI_CONN_L2CAP_FALLBACK
+    if (rc)
+        s_req_pending = 0;          /* no event will come */
+#endif
+    return rc;
 }
 
 void ble_port_refresh_link(struct ble_navi_link *l)
@@ -328,6 +349,10 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
     case BLE_GAP_EVENT_CONNECT:
         if (ev->connect.status == 0) {
             s_conn = ev->connect.conn_handle;
+#ifdef BLE_NAVI_CONN_L2CAP_FALLBACK
+            s_req_pending = 0;
+            s_req_l2cap_tried = 0;
+#endif
             ble_navi_on_connect(s_conn);
             tune_link(s_conn);
         } else {
@@ -348,6 +373,28 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
         ble_port_refresh_link(&g_ble_navi.link);
         rt_kprintf("[nimble] conn update st=%d ci=%u\n", ev->conn_update.status,
                    g_ble_navi.link.conn_interval);
+#ifdef BLE_NAVI_CONN_L2CAP_FALLBACK
+        if (s_req_pending) {
+            s_req_pending = 0;
+            /* the phone's controller refused our LL request with "unacceptable
+             * connection parameters": ask the same through L2CAP signalling,
+             * the way Android handles a peripheral's update request */
+            if (ev->conn_update.status == BLE_HS_HCI_ERR(BLE_ERR_CONN_PARMS) &&
+                !s_req_l2cap_tried) {
+                struct ble_l2cap_sig_update_params lp = {
+                    .itvl_min = s_req.itvl_min, .itvl_max = s_req.itvl_max,
+                    .slave_latency = s_req.latency,
+                    .timeout_multiplier = s_req.supervision_timeout,
+                };
+                s_req_l2cap_tried = 1;
+                int rc = ble_l2cap_sig_update(ev->conn_update.conn_handle, &lp,
+                                              l2cap_upd_cb, NULL);
+                rt_kprintf("[nimble] link tune: phone refused the LL update (HCI 0x%x), "
+                           "L2CAP update %u..%u rc=%d\n", BLE_ERR_CONN_PARMS,
+                           lp.itvl_min, lp.itvl_max, rc);
+            }
+        }
+#endif
         break;
     case BLE_GAP_EVENT_PHY_UPDATE_COMPLETE:
         s_tx_phy = ev->phy_updated.tx_phy;
