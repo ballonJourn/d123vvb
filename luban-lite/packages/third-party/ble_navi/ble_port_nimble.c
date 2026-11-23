@@ -223,6 +223,13 @@ int ble_port_request_phy(uint8_t mask)
     return ble_gap_set_prefered_le_phy(s_conn, mask, mask, BLE_GAP_LE_PHY_CODED_ANY);
 }
 
+int ble_port_read_rssi(int8_t *rssi)
+{
+    if (s_conn == BLE_HS_CONN_HANDLE_NONE)
+        return BLE_HS_ENOTCONN;
+    return ble_gap_conn_rssi(s_conn, rssi);   /* waits for the controller's answer */
+}
+
 int ble_port_request_conn(uint16_t min_ci, uint16_t max_ci, uint16_t lat, uint16_t to)
 {
     if (s_conn == BLE_HS_CONN_HANDLE_NONE)

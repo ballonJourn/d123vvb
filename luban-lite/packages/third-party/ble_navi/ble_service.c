@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <rtthread.h>
+#include <stdlib.h>
 #include <string.h>
 #include "aic_core.h"
 #include "ble_service.h"
@@ -462,6 +463,34 @@ static int cmd_ble_navi(int argc, char **argv)
     struct ble_navi *b = &g_ble_navi;
     if (argc >= 2 && !strcmp(argv[1], "start"))
         return ble_navi_init();
+    if (argc >= 2 && !strcmp(argv[1], "rssi")) {
+        /* "ble_navi rssi [n]": n readings, 100 ms apart (default 20, max 200).
+         * Runs in the shell thread; the read waits for the controller. */
+        int n = argc >= 3 ? atoi(argv[2]) : 20, ok = 0, sum = 0, mn = 127, mx = -128, rc = 0;
+        if (n < 1)
+            n = 1;
+        if (n > 200)
+            n = 200;
+        for (int i = 0; i < n; i++) {
+            int8_t r = 0;
+            rc = ble_port_read_rssi(&r);
+            if (rc != 0)
+                break;
+            ok++;
+            sum += r;
+            if (r < mn)
+                mn = r;
+            if (r > mx)
+                mx = r;
+            rt_thread_mdelay(100);
+        }
+        if (ok)
+            rt_kprintf("rssi: %d readings over ~%d ms: min %d avg %d max %d dBm\n",
+                       ok, ok * 100, mn, sum / ok, mx);
+        else
+            rt_kprintf("rssi: read failed rc=%d (not connected, or the controller does not support Read RSSI)\n", rc);
+        return 0;
+    }
     if (argc >= 2 && !strcmp(argv[1], "psram")) {
         psram_alias_check();
         return 0;
@@ -507,4 +536,4 @@ static int cmd_ble_navi(int argc, char **argv)
     disp_sink_dump_stats();
     return 0;
 }
-MSH_CMD_EXPORT_ALIAS(cmd_ble_navi, ble_navi, ble_navi [start|psram|nodisp on|off] - BLE navigation image receiver);
+MSH_CMD_EXPORT_ALIAS(cmd_ble_navi, ble_navi, ble_navi [start|psram|nodisp on|off|rssi [n]] - BLE navigation image receiver);

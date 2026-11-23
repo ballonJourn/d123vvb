@@ -80,6 +80,7 @@ int  ble_port_notify_erya(uint16_t uuid16, const uint8_t *b, uint16_t n);
 int  ble_port_request_phy(uint8_t phy_mask);            /* 1=1M 2=2M 4=coded */
 int  ble_port_request_conn(uint16_t min_ci, uint16_t max_ci, uint16_t lat, uint16_t to);
 void ble_port_refresh_link(struct ble_navi_link *l);    /* read current params */
+int ble_port_read_rssi(int8_t *rssi);   /* HCI Read RSSI; blocks, never call from the BLE host thread */
 
 #ifdef __cplusplus
 }
