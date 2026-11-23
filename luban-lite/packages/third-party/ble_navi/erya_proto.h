@@ -108,6 +108,12 @@ struct erya {
 };
 
 void erya_init(struct erya *e, const struct erya_cfg *cfg, const struct erya_ops *ops);
+/* Change the picture format asked from the phone and tell it on AAA6 (it also
+ * answers the next read). 0 ok; -1 and nothing changed when out of range:
+ * w, h 16..2048 and multiples of 16 (the JPEG MCU), q 120..200, type "420"/"422".
+ * Whether the app takes a changed format in the middle of a connection is the
+ * app's business: look at the size of the next pictures. */
+int erya_set_pic(struct erya *e, uint16_t w, uint16_t h, uint16_t q, const char *type);
 void erya_on_connect(struct erya *e);
 void erya_on_disconnect(struct erya *e);
 /* a phone write to characteristic uuid16 */

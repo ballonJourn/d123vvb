@@ -19,8 +19,9 @@ static uint8_t *got_pic; static uint32_t got_len; static int pics;
 static struct nav_state got_nav; static int navs;
 static uint8_t last_notify[16][256]; static uint16_t last_notify_len[16];
 
+static unsigned notify_count[16];
 static int d_notify(void *c, uint16_t u, const uint8_t *b, uint16_t n)
-{ (void)c; int i = u - 0xAAA0; memcpy(last_notify[i], b, n); last_notify_len[i] = n; return 0; }
+{ (void)c; int i = u - 0xAAA0; memcpy(last_notify[i], b, n); last_notify_len[i] = n; notify_count[i]++; return 0; }
 static void *d_alloc(void *c, size_t n) { (void)c; allocs++; return malloc(n); }
 static void d_free(void *c, void *p) { (void)c; if (p) frees++; free(p); }
 static uint32_t d_now(void *c) { (void)c; return 0; }
@@ -120,6 +121,42 @@ int main(int argc, char **argv)
     CHECK(n6 > 6 && f6[0] == 'E' && f6[1] == 'Y' && jn == (uint32_t)n6 - 6, "AAA6 EY frame");
     char js6[200]; memcpy(js6, f6 + 6, jn); js6[jn] = 0;
     CHECK(!strcmp(js6, "{\"fun\":\"pic\",\"w\":800,\"h\":480,\"q\":160,\"type\":\"420\"}"), "AAA6 json %s", js6);
+
+    /* 1b. change the requested format at run time (msh "ble_navi pic") */
+    {
+        static const char want[] = "{\"fun\":\"pic\",\"w\":320,\"h\":192,\"q\":140,\"type\":\"422\"}";
+        CHECK(erya_set_pic(&E, 320, 192, 140, "422") == 0, "set_pic accepts 320x192 q140 422");
+        uint8_t *g = last_notify[6]; uint16_t gn = last_notify_len[6];
+        uint32_t gj = (g[2] << 24) | (g[3] << 16) | (g[4] << 8) | g[5];
+        char gs[200]; memcpy(gs, g + 6, gj); gs[gj] = 0;
+        CHECK(gn > 6 && g[0] == 'E' && g[1] == 'Y' && !strcmp(gs, want), "set_pic notifies AAA6: %s", gs);
+        n = erya_read(&E, 0xAAA6, buf, sizeof(buf));
+        CHECK(n > 6 && !memcmp(buf + 6, want, sizeof(want) - 1), "AAA6 read returns the new format");
+
+        uint8_t keep[256]; uint16_t keepn = last_notify_len[6]; memcpy(keep, last_notify[6], keepn);
+        unsigned keepc = notify_count[6];
+        /* every refused call, on its own: nothing may change, not even for a moment
+         * (a version that stored w before validating passed a check made only at the end) */
+#define REFUSED(call, what) do { \
+            CHECK((call) == -1, what " refused"); \
+            CHECK(E.cfg.pic_w == 320 && E.cfg.pic_h == 192 && E.cfg.pic_q == 140 && \
+                  !strcmp(E.cfg.pic_type, "422"), what ": config unchanged"); \
+            CHECK(notify_count[6] == keepc && last_notify_len[6] == keepn && !memcmp(last_notify[6], keep, keepn), \
+                  what ": nothing notified"); \
+        } while (0)
+        REFUSED(erya_set_pic(&E, 321, 192, 140, "420"), "width not a multiple of 16");
+        REFUSED(erya_set_pic(&E, 320, 190, 140, "420"), "height not a multiple of 16");
+        REFUSED(erya_set_pic(&E, 0, 192, 140, "420"), "width 0");
+        REFUSED(erya_set_pic(&E, 640, 2064, 140, "420"), "height over 2048");
+        REFUSED(erya_set_pic(&E, 2064, 192, 140, "420"), "width over 2048");
+        REFUSED(erya_set_pic(&E, 640, 192, 119, "420"), "q 119");
+        REFUSED(erya_set_pic(&E, 640, 192, 201, "420"), "q 201");
+        REFUSED(erya_set_pic(&E, 640, 192, 140, "444"), "type 444");
+        REFUSED(erya_set_pic(&E, 640, 192, 140, NULL), "type NULL");
+#undef REFUSED
+
+        CHECK(erya_set_pic(&E, 800, 480, 160, "420") == 0, "restore 800x480 q160 420");
+    }
     uint8_t ios = 0x01;
     erya_on_write(&E, 0xAAA5, &ios, 1);
     CHECK(E.phone == ERYA_PHONE_IOS, "phone type ios");

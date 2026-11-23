@@ -173,6 +173,17 @@ config BLE_NAVI_ERYA_PIC_Q
     int "Requested picture quality (120..200, ratio = value - 100)"
     range 120 200
     default 160
+config BLE_NAVI_PIC_MAX_PIXELS
+    int "Most pixels the msh command 'ble_navi pic' may ask for (w x h)"
+    range 1024 786432
+    default 245760
+    help
+      Only limits the run-time command. 245760 = 640x384 = 491 KB decoded
+      (RGB565). On demo88 about 1.5 MB of CMA is left after the framebuffers
+      and a new picture is decoded while the previous one is still on screen,
+      so two decoded pictures can exist at once (that is an estimate, not
+      measured). The boot-time size is BLE_NAVI_ERYA_PIC_W x _H.
+
 config BLE_NAVI_ERYA_PIC_TYPE
     string "Requested JPEG sampling (420 or 422)"
     default "420"

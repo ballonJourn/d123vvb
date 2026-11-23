@@ -66,6 +66,22 @@ static void send_pic_format(struct erya *e)
         notify(e, ERYA_UUID_AAA6, f, (uint16_t)n);
 }
 
+int erya_set_pic(struct erya *e, uint16_t w, uint16_t h, uint16_t q, const char *type)
+{
+    if (!type || (strcmp(type, "420") && strcmp(type, "422")))
+        return -1;
+    if (w < 16 || h < 16 || w > 2048 || h > 2048 || (w & 15) || (h & 15))
+        return -1;
+    if (q < 120 || q > 200)
+        return -1;
+    e->cfg.pic_w = w;
+    e->cfg.pic_h = h;
+    e->cfg.pic_q = q;
+    memcpy(e->cfg.pic_type, type, 4);       /* "420" + NUL, checked above */
+    send_pic_format(e);                     /* no-op when nobody is connected */
+    return 0;
+}
+
 static void stream_reset(struct erya_stream *s)
 {
     s->hdr_len = 0;

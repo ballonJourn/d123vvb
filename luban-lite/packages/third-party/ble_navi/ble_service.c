@@ -14,6 +14,9 @@
 #ifndef BLE_NAVI_MAX_FRAME_BYTES
 #define BLE_NAVI_MAX_FRAME_BYTES (1024 * 600 * 2)  /* demo88 panel */
 #endif
+#ifndef BLE_NAVI_PIC_MAX_PIXELS
+#define BLE_NAVI_PIC_MAX_PIXELS 245760
+#endif
 #ifndef BLE_NAVI_DEV_NAME
 #define BLE_NAVI_DEV_NAME "D133-Navi"
 #endif
@@ -463,6 +466,34 @@ static int cmd_ble_navi(int argc, char **argv)
     struct ble_navi *b = &g_ble_navi;
     if (argc >= 2 && !strcmp(argv[1], "start"))
         return ble_navi_init();
+#ifdef BLE_NAVI_ERYA
+    if (argc >= 2 && !strcmp(argv[1], "pic")) {
+        /* "ble_navi pic" shows, "ble_navi pic <w> <h> <q> [420|422]" changes the picture
+         * format asked from the phone (AAA6). Lost at reboot. */
+        struct erya_cfg *c = &b->erya.cfg;
+        if (argc >= 5) {
+            uint32_t w = (uint32_t)atoi(argv[2]), h = (uint32_t)atoi(argv[3]);
+            uint32_t q = (uint32_t)atoi(argv[4]);
+            const char *t = argc >= 6 ? argv[5] : c->pic_type;
+            if (w > 2048 || h > 2048 || w * h > BLE_NAVI_PIC_MAX_PIXELS) {
+                rt_kprintf("pic: %ux%u refused, more than %u pixels (decoded RGB565 sits in CMA)\n",
+                           w, h, (uint32_t)BLE_NAVI_PIC_MAX_PIXELS);
+                return -1;
+            }
+            if (erya_set_pic(&b->erya, (uint16_t)w, (uint16_t)h, (uint16_t)q, t) != 0) {
+                rt_kprintf("pic: refused: w and h 16..2048 and multiples of 16, q 120..200, type 420 or 422\n");
+                return -1;
+            }
+            rt_kprintf("pic: AAA6 notified, look at the size of the phone's next pictures\n");
+        }
+        rt_kprintf("pic: asked from the phone %ux%u q=%u (JPEG quality %u) type %s, decoded %u KB in CMA\n",
+                   c->pic_w, c->pic_h, c->pic_q, c->pic_q - 100u, c->pic_type,
+                   (uint32_t)c->pic_w * c->pic_h * 2 / 1024);
+        if (argc < 5)
+            rt_kprintf("pic: ble_navi pic <w> <h> <q 120..200> [420|422]\n");
+        return 0;
+    }
+#endif
     if (argc >= 2 && !strcmp(argv[1], "rssi")) {
         /* "ble_navi rssi [n]": n readings, 100 ms apart (default 20, max 200).
          * Runs in the shell thread; the read waits for the controller. */
@@ -536,4 +567,4 @@ static int cmd_ble_navi(int argc, char **argv)
     disp_sink_dump_stats();
     return 0;
 }
-MSH_CMD_EXPORT_ALIAS(cmd_ble_navi, ble_navi, ble_navi [start|psram|nodisp on|off|rssi [n]] - BLE navigation image receiver);
+MSH_CMD_EXPORT_ALIAS(cmd_ble_navi, ble_navi, ble_navi [start|psram|nodisp on|off|rssi [n]|pic [w h q [420|422]]] - BLE navigation image receiver);
