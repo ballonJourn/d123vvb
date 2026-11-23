@@ -133,9 +133,16 @@ static void erya_picture(void *ctx, uint8_t *buf, uint32_t len)
     f.data = buf;
     f.len = len;
     f.rx_ms = ops_now(NULL);
-    ERYA_LOG("[erya] AAA7 picture complete: %u bytes in %u ms, JPEG %s -> display\n",
-             len, g_ble_navi.erya.st.last_pic_ms,
-             (len > 3 && buf[0] == 0xFF && buf[1] == 0xD8) ? "SOI ok" : "NO SOI (not a JPEG?)");
+#ifdef BLE_NAVI_ERYA_LOG       /* ms / pk are only used by the log line */
+    {
+        /* receive speed of this picture: tells the link (phone + air + HCI UART)
+         * from the display, which runs later in the "disp" / LVGL thread */
+        uint32_t ms = g_ble_navi.erya.st.last_pic_ms, pk = g_ble_navi.erya.pic_sum;
+        ERYA_LOG("[erya] AAA7 picture complete: %u bytes in %u ms (%u KB/s, %u pkts, %u us/pkt), JPEG %s -> display\n",
+                 len, ms, ms ? len * 1000u / ms / 1024u : 0, pk, pk ? ms * 1000u / pk : 0,
+                 (len > 3 && buf[0] == 0xFF && buf[1] == 0xD8) ? "SOI ok" : "NO SOI (not a JPEG?)");
+    }
+#endif
     disp_sink_submit_owned(&f);         /* sink frees buf */
 }
 static void erya_navi(void *ctx, const struct nav_state *ns)
