@@ -70,7 +70,13 @@ extern "C" {
     ///< 手机互联使能
     #define  MW_CARLINK_EC_ENABLE 0
     ///< 蓝牙模块使能(依赖 RT_USING_WIFI: 蓝牙控制器由 WiFi 驱动上电)
-    #define MW_BT_MODULE_ENABLE 1
+    ///< ble_navi(NimBLE) 与 GOC 蓝牙栈共用 UART2 上同一个 BT 控制器, 只能二选一:
+    ///< 打开 LPKG_USING_BLE_NAVI 时 GOC 栈(含蓝牙胎压)不编译、不链接
+    #if defined(LPKG_USING_BLE_NAVI)
+        #define MW_BT_MODULE_ENABLE 0
+    #else
+        #define MW_BT_MODULE_ENABLE 1
+    #endif
     ///< WiFi 测试命令使能（wifi_join/wifi_leave，配合 iperf 使用）
     #define WIFILESS_TEST_ENABLE 0
 #endif

@@ -308,7 +308,16 @@ RT_WEAK int ble_navi_bt_vendor_init(void)
 /* ---------------- public ---------------- */
 int ble_navi_init(void)
 {
+    static int s_started;
     struct ble_navi *b = &g_ble_navi;
+
+    /* `ble_navi start` by hand after a board-level autostart (or twice):
+     * a second init would re-register the GATT services and timers. */
+    if (s_started) {
+        rt_kprintf("[ble_navi] already started\n");
+        return 0;
+    }
+    s_started = 1;
     memset(&b->link, 0, sizeof(b->link));
     b->link.conn_handle = 0xFFFF;
     b->link.att_mtu = 23;

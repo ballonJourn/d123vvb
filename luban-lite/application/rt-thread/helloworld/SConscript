@@ -79,7 +79,10 @@ src  += Glob('mw/usbhost/*.c')
 # d21x 为 RV64, 直接链接会报 ABI/ELF 位宽不兼容
 if GetDepend('RT_USING_WIFI'):
     libs += ['libECTinyPlus_och.a']
-    libs += ['libgoc_btstack.a']
+    # GOC 蓝牙栈与 ble_navi(NimBLE) 互斥: 两者都驱动 UART2 上的 BT 控制器,
+    # 且该库整体链接(--whole-archive)时其 uECC_* 与 NimBLE tinycrypt 重名
+    if not GetDepend('LPKG_USING_BLE_NAVI'):
+        libs += ['libgoc_btstack.a']
 
 CFLAGS = ' -c -ffunction-sections'
 
