@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>D133 BLE Navi 发送端</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Semi+Condensed:wght@500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --paper: #EEF2F5; --sheet: #FFFFFF; --ink: #14324A; --ink-2: #4B6478; --rule: #C9D3DB;
+  --ok: #2B8C83; --retx: #D9952E; --lost: #C0453B; --sent: #7FA7C4; --pend: #DCE3E9;
+  --focus: #1F6FB2;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #16202A; --sheet: #1D2934; --ink: #E3ECF3; --ink-2: #9DB1C2; --rule: #34465A;
+    --ok: #3FB0A5; --retx: #E8A84A; --lost: #E0685E; --sent: #5D8AAD; --pend: #2A3947;
+    --focus: #6FB1EA; color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  font: 15px/1.45 "Barlow", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: var(--ink); background: var(--paper);
+  /* plotter-paper grid */
+  background-image: linear-gradient(var(--rule) 1px, transparent 1px),
+                    linear-gradient(90deg, var(--rule) 1px, transparent 1px);
+  background-size: 24px 24px; background-attachment: fixed;
+  font-variant-numeric: tabular-nums;
+}
+@media (prefers-color-scheme: dark) { body { background-image: none; } }
+header { padding: 18px 24px 8px; display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+h1 { font: 600 24px/1.1 "Barlow Semi Condensed", "Barlow", sans-serif; margin: 0; letter-spacing: .01em; }
+#linkline { color: var(--ink-2); }
+main { display: grid; grid-template-columns: minmax(280px, 340px) 1fr; gap: 16px; padding: 8px 24px 24px; }
+@media (max-width: 860px) { main { grid-template-columns: 1fr; padding: 8px 12px 16px; } header { padding: 14px 12px 6px; } }
+aside, section { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; }
+aside { padding: 14px 16px; align-self: start; }
+fieldset { border: 0; border-top: 1px solid var(--rule); margin: 0; padding: 12px 0 14px; min-width: 0; }
+input[type=file] { max-width: 100%; min-width: 0; }
+fieldset:first-child { border-top: 0; padding-top: 0; }
+legend { font: 600 16px "Barlow Semi Condensed", sans-serif; padding: 0 0 6px; }
+label { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 150px); align-items: center; gap: 8px; margin: 6px 0; color: var(--ink-2); }
+label.wide { grid-template-columns: 1fr; }
+input, select, button { font: inherit; color: var(--ink); }
+input[type=number], input[type=text], select {
+  width: 100%; min-width: 0; padding: 5px 8px; border: 1px solid var(--rule); border-radius: 4px; background: var(--paper);
+}
+input[type=range] { width: 100%; min-width: 0; margin: 0; accent-color: var(--ok); }
+button {
+  padding: 7px 14px; border-radius: 4px; border: 1px solid var(--ink); background: var(--sheet); cursor: pointer;
+}
+button.primary { background: var(--ink); color: var(--sheet); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.wh { display: flex; gap: 6px; min-width: 0; }
+.wh input { flex: 1 1 0; padding: 5px 4px; }
+#sResult { font-size: 17px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+#preview { width: 100%; aspect-ratio: 1024 / 600; border: 1px solid var(--rule); border-radius: 4px; background: var(--paper); display: block; margin-top: 8px; }
+#imginfo, .hint { color: var(--ink-2); font-size: 13px; margin: 6px 0 0; }
+.icons { display: flex; gap: 6px; margin-top: 6px; }
+.icons canvas { width: 48px; height: 48px; border: 1px solid var(--rule); border-radius: 4px; cursor: pointer; image-rendering: pixelated; background: #000; }
+.icons canvas[aria-pressed=true] { outline: 2px solid var(--ok); outline-offset: 1px; }
+
+.right { display: grid; gap: 16px; align-content: start; min-width: 0; }
+section { padding: 14px 16px; min-width: 0; }
+.maphead { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+#progress { font: 600 44px/1 "Barlow Semi Condensed", sans-serif; }
+#progress small { font-size: 18px; color: var(--ink-2); font-weight: 500; margin-left: 8px; }
+#chunkmap { width: 100%; height: 300px; display: block; margin-top: 10px; image-rendering: pixelated; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; color: var(--ink-2); font-size: 13px; margin-top: 8px; }
+.legend i { display: inline-block; width: 11px; height: 11px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 4px 18px; }
+.stats div { padding: 6px 0; border-bottom: 1px solid var(--rule); }
+.stats b { display: block; font: 600 22px/1.15 "Barlow Semi Condensed", sans-serif; }
+.stats span { color: var(--ink-2); font-size: 13px; }
+.chartbox { position: relative; height: 220px; }
+#log { height: 150px; overflow: auto; font-size: 13px; color: var(--ink-2); white-space: pre-wrap; margin: 0; }
+#log .err { color: var(--lost); }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>D133 BLE Navi 发送端</h1>
+  <span id="linkline">未连接。用 Chrome / Edge 打开，或先选“模拟”试用。</span>
+  <span><a href="erya.html" style="color:var(--focus)">尔雅协议发送端</a></span>
+</header>
+<main>
+  <aside>
+    <fieldset>
+      <legend>连接</legend>
+      <div class="row">
+        <button id="btnConnect" class="primary">连接开发板</button>
+        <button id="btnSim">模拟（无板）</button>
+        <button id="btnDisconnect" disabled>断开</button>
+      </div>
+      <label>模拟丢包率 <input id="simLoss" type="number" min="0" max="0.6" step="0.01" value="0.03"></label>
+      <label>模拟速率 KB/s <input id="simKbps" type="number" min="5" max="200" step="5" value="60"></label>
+      <p class="hint">模拟模式的接收端是固件 ble_img_rx.c 编译成的 WebAssembly，与板上同一份代码。</p>
+    </fieldset>
+    <fieldset>
+      <legend>链路调优</legend>
+      <div class="row">
+        <button id="btnPhy" disabled>请求 2M PHY</button>
+        <button id="btnConn" disabled>请求 15 ms 间隔</button>
+      </div>
+      <label>屏障间隔（包） <input id="window" type="number" min="1" max="200" value="24"></label>
+      <p class="hint">每发 N 包无响应写，插一次带响应查询，防止系统 BLE 队列溢出并取回缺包表。</p>
+    </fieldset>
+    <fieldset>
+      <legend>导航画面</legend>
+      <label class="wide"><input id="file" type="file" accept="image/*"></label>
+      <label>格式 <select id="fmt"><option value="1">JPEG（推荐）</option><option value="0">RGB565 原始</option></select></label>
+      <label>JPEG 质量 <input id="quality" type="range" min="0.3" max="0.95" step="0.05" value="0.75"></label>
+      <label>宽 × 高 <span class="wh"><input id="w" type="number" value="1024" aria-label="宽"><input id="h" type="number" value="600" aria-label="高"></span></label>
+      <canvas id="preview" width="1024" height="600"></canvas>
+      <p id="imginfo">未选择图片：将发送内置示例地图。</p>
+      <div class="row">
+        <button id="btnSend" class="primary" disabled>发送画面</button>
+        <button id="btnCut" disabled>传输中断开（测续传）</button>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>转向与路名</legend>
+      <div class="icons" id="icons" role="group" aria-label="转向图标"></div>
+      <label>路名 <input id="road" type="text" value="中山北路"></label>
+      <label>距离 <input id="dist" type="text" value="300 m"></label>
+      <label>到达 <input id="eta" type="text" value="12:45"></label>
+      <div class="row"><button id="btnNav" disabled>发送转向与路名</button></div>
+    </fieldset>
+  </aside>
+
+  <div class="right">
+    <section aria-label="分块图">
+      <div class="maphead">
+        <div id="progress">0%<small>等待发送</small></div>
+        <div id="frameinfo" class="hint"></div>
+      </div>
+      <canvas id="chunkmap" aria-label="每个格子是一个分块"></canvas>
+      <div class="legend">
+        <span><i style="background:var(--pend)"></i>待发</span>
+        <span><i style="background:var(--sent)"></i>已发未确认</span>
+        <span><i style="background:var(--lost)"></i>设备报告缺失</span>
+        <span><i style="background:var(--retx)"></i>已重传</span>
+        <span><i style="background:var(--ok)"></i>设备已确认</span>
+      </div>
+    </section>
+    <section aria-label="统计">
+      <div class="stats">
+        <div><b id="sThr">–</b><span>有效吞吐 KB/s</span></div>
+        <div><b id="sSent">–</b><span>已发包</span></div>
+        <div><b id="sRetx">–</b><span>重传包</span></div>
+        <div><b id="sLost">–</b><span>设备报告缺失</span></div>
+        <div><b id="sDup">–</b><span>设备收到重复</span></div>
+        <div><b id="sTime">–</b><span>用时 s</span></div>
+        <div><b id="sResume">–</b><span>续传</span></div>
+        <div><b id="sResult">–</b><span>结果 / CRC</span></div>
+      </div>
+    </section>
+    <section aria-label="吞吐曲线">
+      <div class="chartbox"><canvas id="chart"></canvas></div>
+    </section>
+    <section aria-label="日志"><pre id="log"></pre></section>
+  </div>
+</main>
+<script src="vendor/chart.umd.min.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>

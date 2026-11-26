@@ -107,6 +107,13 @@ static int hci_h4_uart_frame_cb(uint8_t pkt_type, void *data)
 }
 #endif
 
+#ifndef LPKG_NIMBLE_HCI_UART_RX_BUFSZ
+#define LPKG_NIMBLE_HCI_UART_RX_BUFSZ RT_SERIAL_RB_BUFSZ
+#endif
+#ifndef LPKG_NIMBLE_HCI_UART_RX_THREAD_PRIORITY
+#define LPKG_NIMBLE_HCI_UART_RX_THREAD_PRIORITY 24
+#endif
+
 static void rtthread_uart_rx_entry(void *parameter)
 {
     rt_size_t size;
@@ -115,8 +122,10 @@ static void rtthread_uart_rx_entry(void *parameter)
 
     while (1) {
         if (!rt_mq_recv(&g_rx_mq, &size, sizeof(rt_size_t), 10000)) {
-            data_len = rt_device_read(g_serial, 0, &data, size);
-            if (data_len > 0) {
+            /* Drain everything the ring holds, in chunks that fit data[]: the
+             * notified size can exceed sizeof(data) with a large rx buffer,
+             * and notifications are lost when the queue is full. */
+            while ((data_len = rt_device_read(g_serial, 0, data, sizeof(data))) > 0) {
 #if defined(LPKG_NIMBLE_HCI_H5) // H5
                 hci_h5_sm_rx(&g_hci_h5sm, data, data_len);
 #elif defined(LPKG_NIMBLE_HCI_H4)
@@ -166,6 +175,11 @@ static int rtthread_hci_uart_init(void)
     }
 
     config.baud_rate = BAUD_RATE_115200;
+    /* RX ring: at 1.5 Mbps the default 64 bytes fill in ~0.4 ms. With RS232
+     * auto flow control RTS follows only the hardware FIFO, so any delay of
+     * this thread longer than that dropped bytes and desynced H4. The size
+     * can only be set before the device is opened. */
+    config.bufsz = LPKG_NIMBLE_HCI_UART_RX_BUFSZ;
     config.data_bits = DATA_BITS_8;
     config.stop_bits = STOP_BITS_1;
 #if defined(LPKG_NIMBLE_HCI_H5) // H5
@@ -196,7 +210,8 @@ static int rtthread_hci_uart_init(void)
 #endif
 
     rt_thread_t rx_thread = rt_thread_create("hci_uart_rx", rtthread_uart_rx_entry,
-                                            RT_NULL, 4096, 24, 10);
+                                            RT_NULL, 4096,
+                                            LPKG_NIMBLE_HCI_UART_RX_THREAD_PRIORITY, 10);
     if (rx_thread != RT_NULL) {
         rt_thread_startup(rx_thread);
     } else {
