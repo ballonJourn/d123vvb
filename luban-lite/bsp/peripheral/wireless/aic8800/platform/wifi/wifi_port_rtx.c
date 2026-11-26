@@ -218,11 +218,7 @@ rt_err_t aic8800_softap(struct rt_wlan_device *wlan, struct rt_ap_info *ap_info)
     ap_cfg.bcn_interval = 100;
     ap_cfg.hidden_ssid = ap_info->hidden;
     ap_cfg.band = (ap_info->channel >= 36) ? PHY_BAND_5G : PHY_BAND_2G4;
-#ifdef AIC_WLAN_AP_BW_40M
-    ap_cfg.type = PHY_CHNL_BW_40;       /* 40 MHz: about twice the PHY rate; untested, try it on a 5 GHz channel first */
-#else
     ap_cfg.type = PHY_CHNL_BW_20;
-#endif
     ap_cfg.channel = ap_info->channel;
     ap_cfg.enable_he = 1;
     ap_cfg.enable_acs = 0;
@@ -428,6 +424,24 @@ INIT_COMPONENT_EXPORT(wifi_device_reg);
 #define CMD_RX_BUF_SIZE 128
 char cmd_rx_buf[CMD_RX_BUF_SIZE];
 
+/*
+ * 本工程未调用 aic_cli_cmd_init()，CLI 队列没有消费任务，
+ * 经 aic_cli_run_cmd() 下发的命令会被静默丢弃。
+ * 这里直接同步调用处理函数，保证 wifi_test 命令可执行。
+ */
+extern struct rwnx_hw *g_rwnx_hw;
+extern int handle_private_cmd(struct rwnx_hw *rwnx_hw, char *command);
+
+/* CliPrint() 的输出依赖 Cli_cb 回调，本工程从未调用 CliSetCb()；
+ * 不注册的话所有 rftest 命令的输出都会被丢弃。 */
+typedef void (*wifi_cli_cb_t)(char *rsp);
+extern void CliSetCb(wifi_cli_cb_t cb);
+
+static void wifi_cli_print(char *rsp)
+{
+    rt_kprintf("%s", rsp);
+}
+
 int wifi_cli_handler(int argc, char** argv)
 {
     int len = 0, cur_len = 0;
@@ -445,8 +459,14 @@ int wifi_cli_handler(int argc, char** argv)
         }
     }
     cmd_rx_buf[len] = '\0';
-    aic_cli_run_cmd(cmd_rx_buf);
-    return 0;
+
+    if (g_rwnx_hw == RT_NULL) {
+        rt_kprintf("wifi_test: driver not ready\n");
+        return -1;
+    }
+
+    CliSetCb(wifi_cli_print);
+    return handle_private_cmd(g_rwnx_hw, cmd_rx_buf);
 }
 
 rt_err_t wifi_test(int argc, char** argv)

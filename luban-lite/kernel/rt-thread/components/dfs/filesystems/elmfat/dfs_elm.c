@@ -535,11 +535,11 @@ int dfs_elm_close(struct dfs_fd *file)
             /* close file if fs is not unmount */
             result = f_close(fd);
         }
-        if (result == FR_OK)
-        {
-            /* release memory */
-            rt_free_align(fd);
-        }
+        /* Release the FIL object even if f_close failed (e.g. hot-unplug:
+         * f_sync cannot flush to a dead device). Nothing references the FIL
+         * after this point (FF_FS_LOCK == 0, caller discards file->data),
+         * skipping the free leaks ~4KB per failed close. */
+        rt_free_align(fd);
     }
 
     return elm_result_to_dfs(result);

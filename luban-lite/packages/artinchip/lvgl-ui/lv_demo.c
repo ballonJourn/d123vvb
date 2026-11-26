@@ -37,12 +37,6 @@ void lv_user_gui_init(void)
 #if defined(AIC_LVGL_DEMO) && !defined(RT_USING_MODULE)
     aic_ui_init();
 #endif
-#if defined(LPKG_USING_BLE_NAVI) && defined(BLE_NAVI_DISP_LVGL)
-    /* BLE navigation pictures: lv_image on lv_layer_top(), fed from the
-     * LVGL thread (packages/third-party/ble_navi/disp_sink.c) */
-    extern void ble_navi_lv_attach(void);
-    ble_navi_lv_attach();
-#endif
 }
 
 #if defined KERNEL_RTTHREAD

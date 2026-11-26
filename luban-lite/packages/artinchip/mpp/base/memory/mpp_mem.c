@@ -146,9 +146,11 @@ unsigned int mpp_phy_alloc(size_t size)
      * the regular PSRAM software heap. GE/VE access these buffers via
      * DMA-BUF FD and don't require physical contiguity. */
     void *p;
+#if defined(AIC_PSRAM_SW_EN)
     if (size > 1024 * 1024)
         p = aicos_malloc_align(MEM_PSRAM_SW, size, 1024);
     else
+#endif
         p = aicos_malloc_align_try_cma(size, 1024);
 
     unsigned int addr = (unsigned long)p;

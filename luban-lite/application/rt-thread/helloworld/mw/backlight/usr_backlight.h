@@ -24,6 +24,12 @@ typedef enum {
 
 void set_backlight_level(uint8_t level);
 
+/**
+ * @brief  当前实际生效的背光档位
+ * @return BACKLIGHT_LEVEL_1..5；0 表示尚未设置过一档
+ */
+uint8_t get_backlight_level(void);
+
 void init_backlight_pwm(void);
 
 /**

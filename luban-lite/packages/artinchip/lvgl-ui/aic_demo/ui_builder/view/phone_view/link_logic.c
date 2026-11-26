@@ -6,6 +6,7 @@
 #include "vehicle_argument.h"
 #include "vehicle_data.h"
 #include "mileage_calc.h"
+#include "dev_config.h"
 
 #define REFRESH_INTERVAL_50_MS   (50)
 
@@ -30,7 +31,9 @@ void link_init()
     return  ;
 }
 
+#if MW_CARLINK_EC_ENABLE
 extern const char *get_carlink_url(void);
+#endif
 
 static void timer_refresh_50_ms(lv_timer_t *info)
 {
@@ -39,6 +42,7 @@ static void timer_refresh_50_ms(lv_timer_t *info)
     int __state = vehicle_get_data(VEH_CARLINK_CONNECTED) ;
     phone_refresh_link_state(!!__state) ;
 
+#if MW_CARLINK_EC_ENABLE
    if (!init_qr)
     {
         if (vehicle_get_data(VEH_CARLINK_URL_STATUS))
@@ -48,8 +52,9 @@ static void timer_refresh_50_ms(lv_timer_t *info)
             phone_refresh_qr(get_carlink_url());
             init_qr = true ;
         }
-        
+
     }
+#endif
 
     int32_t _speed = speed_view_current();
     if (current_speed != _speed)

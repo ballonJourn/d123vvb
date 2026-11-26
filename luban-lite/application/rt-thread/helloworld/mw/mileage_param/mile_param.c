@@ -5,6 +5,7 @@
 #include "aic_crc32.h"
 #include "mile_param.h"
 #include "hal_eeprom.h"
+#include "power_manage.h"
 
 #if MILEAGE_PARAM_ENABLE
 
@@ -18,7 +19,7 @@
 #define MAX_WRITE_RETRIES           (3)
 
 #define MILE_TASK_PRIORITY      10         
-#define SAVE_QUEUE_SIZE         10
+#define SAVE_QUEUE_SIZE         5
 
 #define INVALID_DATA            (0xFFFFFFFF)
 #define INVALID_DATA16          (0xFFFF)
@@ -26,12 +27,8 @@
 #define TRIP_MAX_DATA           (999999)
 #define MILE_DATA_MARGIN_RANGE  (200)   ///< 里程数据误差范围
 
-typedef struct {
-    mile_param_t param_data;
-} save_request_t;
-
 static rt_mutex_t g_param_mutex;
-static rt_mailbox_t g_save_queue;
+static rt_mq_t g_save_queue;
 
 static mile_param_t mile_param; 
 static mile_param_t mile_param_pre = { 
@@ -40,7 +37,7 @@ static mile_param_t mile_param_pre = {
 };
 
 static bool is_recovery_mile_param = false;
-static char g_latest_valid_slot[ZONE_NUM];
+static int g_latest_valid_slot[ZONE_NUM];
 
 /**
  * @brief  获取分区对应槽位的地址
@@ -144,12 +141,12 @@ static bool is_all_ff_param(const mile_param_t *param) {
  * @param  zone 分区范围 0-1
  * @return 返回最新的槽位区域
  */
-static char find_latest_valid_slot_in_zone(uint8_t zone) {
+static int find_latest_valid_slot_in_zone(uint8_t zone) {
     mile_param_t temp_param;
-    char latest_valid_slot = -1;
+    int latest_valid_slot = -1;
     uint32_t highest_erase_counter = 0;
 
-    for (char slot = 0; slot < SLOT_PER_ZONE; slot++) {
+    for (int slot = 0; slot < SLOT_PER_ZONE; slot++) {
         if (read_slot_from_eeprom(zone, slot, &temp_param) == 0 
             && is_valid_param(&temp_param)) {
             if (latest_valid_slot == -1 || temp_param.erase_counter > \
@@ -258,6 +255,7 @@ static int perform_read_arbitration(void) {
  */
 static int perform_write_arbitration(const mile_param_t *new_param) {
     int next_write_slots[ZONE_NUM];
+    bool slot_initialized[ZONE_NUM] = {false};
 
     for (int z = 0; z < ZONE_NUM; z++) {
         if (g_latest_valid_slot[z] == -1) {
@@ -265,16 +263,19 @@ static int perform_write_arbitration(const mile_param_t *new_param) {
         } else {
             next_write_slots[z] = (g_latest_valid_slot[z] + 1) % SLOT_PER_ZONE;
         }
+        slot_initialized[z] = true;
     }
 
     for (int attempt = 0; attempt < MAX_WRITE_RETRIES; attempt++) {
         bool all_success = true;
-        bool zone_success[ZONE_NUM] = {false};
 
         for (int z = 0; z < ZONE_NUM; z++) {
+            if (!slot_initialized[z]) {
+                continue;
+            }
             int ret = write_slot_to_eeprom(z, next_write_slots[z], new_param);
             if (ret == 0) {
-                zone_success[z] = true;
+                slot_initialized[z] = false;
             } else {
                 all_success = false;
                 rt_log_error("Write param failed times:%d zone:%d, slot:%d.\n", \
@@ -292,7 +293,7 @@ static int perform_write_arbitration(const mile_param_t *new_param) {
         if (attempt < MAX_WRITE_RETRIES - 1) {
             rt_log_info("Write param times:%d, Retrying...\n", attempt + 1);
             for (int z = 0; z < ZONE_NUM; z++) {
-                if (!zone_success[z]) {
+                if (slot_initialized[z]) {
                     next_write_slots[z] = (next_write_slots[z] + 1) % SLOT_PER_ZONE;
                 }
             }
@@ -306,6 +307,7 @@ static int perform_write_arbitration(const mile_param_t *new_param) {
 static int save_mile_param(const mile_param_t *param) {
     if (!is_recovery_mile_param || !param) { 
         rt_log_error("param error or recovery param is not ok!\n");
+        return -1;
     }
 
     if (memcmp(&mile_param_pre, param, sizeof(mile_param_t) - 4) == 0) {
@@ -322,7 +324,6 @@ static int save_mile_param(const mile_param_t *param) {
         rt_log_error("write mile param failed!\n");
         return -1;  
     }
-
     memcpy(&mile_param_pre, &mile_param, sizeof(mile_param_t));
     return ret;
 }
@@ -340,6 +341,18 @@ bool get_recovery_mile_param(void) {
 }
 
 bool set_mile_param(mile_param_handle_e id, void *param) {
+    ///< 下电中: 丢弃非下电触发的落盘, 避免写入被断电截断.
+    ///< 仍返回 true(视为已受理) —— 数据是"按下电策略主动丢弃", 不是写入失败, 免得调用方刷错误日志
+    if (power_is_off_pending()) {
+        rt_log_info("power off pending, drop mile param id=%d!\n", id);
+        return true;
+    }
+
+    return set_mile_param_force(id, param);
+}
+
+///< 落盘主体, 不受下电闸门限制 —— 供下电清零里程使用
+bool set_mile_param_force(mile_param_handle_e id, void *param) {
     if (!g_param_mutex || !g_save_queue || !param) return false;
 
     if (!is_recovery_mile_param) {
@@ -373,6 +386,18 @@ bool set_mile_param(mile_param_handle_e id, void *param) {
         case MILE_PARAM_RANGE:
             temp_param.range = *((uint16_t *)param);
             break;
+        case MILE_PARAM_NFC_UID1:
+            temp_param.nfc_uid1 = *((uint32_t *)param);
+            break;
+        case MILE_PARAM_NFC_UID2:
+            temp_param.nfc_uid2 = *((uint32_t *)param);
+            break;
+        case MILE_PARAM_WIRELESS_KEY1:
+            temp_param.wireless_key1 = *((uint32_t *)param);
+            break;
+        case MILE_PARAM_WIRELESS_KEY2:
+            temp_param.wireless_key2 = *((uint32_t *)param);
+            break;
         default:
             valid_id = false;
             break;
@@ -393,9 +418,7 @@ bool set_mile_param(mile_param_handle_e id, void *param) {
 
     rt_mutex_release(g_param_mutex);
 
-    save_request_t request;
-    memcpy(&request.param_data, &temp_param, sizeof(mile_param_t));
-    err = rt_mb_send(g_save_queue, (rt_ubase_t)&request);
+    err = rt_mq_send(g_save_queue, &temp_param, sizeof(mile_param_t));
     if (err != 0) {
         rt_log_error("Failed to send mile param queue, id = %d\n", id);
         return false;
@@ -436,6 +459,18 @@ bool get_mile_param(mile_param_handle_e id, void *param) {
         case MILE_PARAM_RANGE:
             *((uint16_t *)param) = mile_param.range;
             break;
+        case MILE_PARAM_NFC_UID1:
+            *((uint32_t *)param) = mile_param.nfc_uid1;
+            break;
+        case MILE_PARAM_NFC_UID2:
+            *((uint32_t *)param) = mile_param.nfc_uid2;
+            break;
+        case MILE_PARAM_WIRELESS_KEY1:
+            *((uint32_t *)param) = mile_param.wireless_key1;
+            break;
+        case MILE_PARAM_WIRELESS_KEY2:
+            *((uint32_t *)param) = mile_param.wireless_key2;
+            break;
         default:
             status = false;
             break;
@@ -452,8 +487,12 @@ static void printf_mile_param_info(mile_param_t *param) {
         rt_log_info("trip:%lu\n", param->trip);
         rt_log_info("ride_time:%lu\n", param->ride_time);
         rt_log_info("avg_elec_cons:%d\n", param->avg_elec_cons);
-        rt_log_info("rang:%d\n", param->range);
-        rt_log_info("\n--------mile param end--------\n");
+        rt_log_info("range:%d\n", param->range);
+        rt_log_info("NFC uid1:%08lx\n", (unsigned long)param->nfc_uid1);
+        rt_log_info("NFC uid2:%08lx\n", (unsigned long)param->nfc_uid2);
+        rt_log_info("wire key1:%08lx\n", (unsigned long)param->wireless_key1);
+        rt_log_info("wire key2:%08lx\n", (unsigned long)param->wireless_key2);
+        rt_log_info("mile param end--------\n");
     }
 }
 
@@ -518,10 +557,9 @@ static int read_mile_param(void) {
     } else {
         rt_log_info("Use default mile param.\n");
         memset(&mile_param, 0, sizeof(mile_param_t));
-        save_request_t initial_save_request;
-        memset(&initial_save_request.param_data, 0, sizeof(mile_param_t));
         memset(&mile_param_pre, 0xFF, sizeof(mile_param_pre)); 
-        rt_err_t err = rt_mb_send(g_save_queue, (rt_ubase_t)&initial_save_request);
+        mile_param_t initial_param = {0};
+        rt_err_t err = rt_mq_send(g_save_queue, &initial_param, sizeof(mile_param_t));
         if (err != RT_EOK) {
             rt_log_error("Failed to send initial queue.\n");
             return -1;
@@ -534,11 +572,12 @@ static int read_mile_param(void) {
     }
 
     check_mile_param();
+
     return ret;
 }
 
 static void mile_param_thread(void *parameter) {
-    save_request_t request;    
+    mile_param_t request;    
     int err;
 
     if (read_mile_param() != 0) {
@@ -546,14 +585,16 @@ static void mile_param_thread(void *parameter) {
     }
 
     for (;;) {
-        err = rt_mb_recv(g_save_queue, (rt_ubase_t*)&request, RT_WAITING_FOREVER);
+        err = rt_mq_recv(g_save_queue, &request, 
+                        sizeof(mile_param_t), 
+                        RT_WAITING_FOREVER);
         if (err != 0) {
             rt_log_error("Failed to receive from save queue, err=%d\n", err);
             continue;
         }
 
         rt_mutex_take(g_param_mutex, RT_WAITING_FOREVER);
-        save_mile_param(&request.param_data);
+        save_mile_param(&request);
         rt_mutex_release(g_param_mutex);
     }
 }
@@ -567,7 +608,8 @@ int mile_param_init(void) {
         return -1;
     }
 
-    g_save_queue = rt_mb_create("save_queue", SAVE_QUEUE_SIZE, RT_IPC_FLAG_FIFO);
+     g_save_queue = rt_mq_create("save_queue", sizeof(mile_param_t), 
+                                    SAVE_QUEUE_SIZE, RT_IPC_FLAG_FIFO);
     if (g_save_queue == RT_NULL) {
         rt_log_error("Failed to create save queue for mile_param.\n");
         rt_mutex_delete(g_param_mutex);
@@ -591,7 +633,7 @@ int mile_param_init(void) {
         rt_thread_startup(thread);
     } else {
         rt_log_info("Create mile param thread faile!\n");
-        rt_mb_delete(g_save_queue);
+        rt_mq_delete(g_save_queue);
         g_save_queue = RT_NULL;
         rt_mutex_delete(g_param_mutex);
         g_param_mutex = RT_NULL;

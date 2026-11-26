@@ -278,6 +278,12 @@ static const struct rt_can_ops aic_can_ops =
     aic_can_recv,
 };
 
+/* CAN 休眠唤醒通知. 应用层定义同名强符号即可覆盖, 用于在 CAN 唤醒中断里
+ * 通知低功耗模块(运行在 ISR 上下文, 不要做耗时操作). */
+RT_WEAK void aic_can_wakeup_notify(void)
+{
+}
+
 void aic_can_callback(can_handle * phandle, void *arg)
 {
     struct aic_can *p_aic_can;
@@ -299,6 +305,9 @@ void aic_can_callback(can_handle * phandle, void *arg)
         break;
     case CAN_EVENT_TX_FAIL:
         rt_hw_can_isr(pcan, RT_CAN_EVENT_TX_FAIL);
+        break;
+    case CAN_EVENT_WAKEUP:
+        aic_can_wakeup_notify();
         break;
     default:
         break;

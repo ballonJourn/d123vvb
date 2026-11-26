@@ -422,6 +422,14 @@ static void hal_can_error_handle(can_handle *phandle, u32 err_status)
         if (phandle->autoBusoff)
             hal_can_release_reset_mode(phandle);
     }
+
+    /* 休眠唤醒中断: 控制器在 Sleep Mode 下检测到总线活动时置位,
+     * 控制器同时会自动退出休眠模式(SJA1000 语义)。这里只把事件抛给上层,
+     * 由应用层决定是否唤醒/复位系统。 */
+    if (err_status & CAN_INTR_WAKEUP) {
+        if (phandle->callback)
+            phandle->callback(phandle, (void *)CAN_EVENT_WAKEUP);
+    }
 }
 
 int hal_can_attach_callback(can_handle *phandle, void *callback, void *arg)
@@ -494,7 +502,7 @@ int hal_can_send_frame(can_handle *phandle, can_msg_t * msg, can_op_req_t req)
 
     /*check hardware, if not writable, refuse, avoid two frame mix*/
     if (!(readl(phandle->can_base + CAN_STAT_REG) & CAN_STAT_TXB)) {
-        hal_log_err("hardware write refuse\n");
+        hal_log_debug("hardware write refuse\n");
         return -CAN_SEND_STATUS_HR_REFUSE;
     }
 

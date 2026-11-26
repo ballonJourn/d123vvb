@@ -20,6 +20,11 @@ typedef enum {
 
 int light_gpio_init(void);
 
+/**
+ * @brief  下电低功耗: 删除 IO 轮询线程
+ */
+void light_gpio_sleep(void);
+
 #endif
 
 #ifdef __cplusplus

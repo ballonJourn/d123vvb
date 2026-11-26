@@ -17,6 +17,7 @@ enum aic_reboot_reason {
     REBOOT_REASON_UPGRADE,          /* Goto BROM upgrade mode */
     REBOOT_REASON_BL_UPGRADE,       /* Goto Bootloader upgrade mode */
     REBOOT_REASON_BL_HID_UPGRADE,   /* Goto Bootloader HID upgrade mode */
+    REBOOT_REASON_BL_UDISK_UPGRADE, /* Goto Bootloader U-Disk upgrade (app confirmed) */
 
     /* Software exception reason, MUST begin with 10 */
     REBOOT_REASON_SW_LOCKUP         = 10,

@@ -254,6 +254,24 @@ int upg_type_check(enum boot_device bd)
         return 0;
     }
 
+    if (r == REBOOT_REASON_BL_UDISK_UPGRADE) {
+        /*
+         * Application has confirmed there is an upgrade file on the U-Disk.
+         * Only U-Disk upgrade is allowed here; if the U-Disk is not detected,
+         * clear the reason and continue normal boot instead of falling into
+         * the USB/UART wait loop.
+         */
+        aic_clr_reboot_reason();
+#if defined(AICUPG_UDISK_ENABLE)
+        if (usbh_init() == 0 && usbh_hub_connect_check()) {
+            upg_type = UPG_TYPE_UDISK;
+            upg_mode = UPG_MODE_NORMAL;
+            return 0;
+        }
+#endif
+        return -1;
+    }
+
     if (r == REBOOT_REASON_BL_HID_UPGRADE) {
         /*
          * User run command "aicupg gotobl" in Application, to enter upgmode of
@@ -291,20 +309,11 @@ int upg_type_check(enum boot_device bd)
         return 0;
     }
 
-#if defined(AICUPG_UDISK_ENABLE)
     /*
-     * D21x udisk upgrade in bootloader
-     * D13x maybe BROM not recognize the udisk but bootloader can recognize it
+     * NOTE: U-Disk is intentionally NOT detected here. Automatic upgrade on
+     * normal boot is disabled by product requirement; only an application-
+     * initiated reboot with REBOOT_REASON_BL_UPGRADE enters U-Disk upgrade.
      */
-    boot_time_trace("UDISK checked");
-    if (usbh_init() == 0) {
-        if (usbh_hub_connect_check()) {
-            upg_type = UPG_TYPE_UDISK;
-            upg_mode = UPG_MODE_NORMAL;
-            return 0;
-        }
-    }
-#endif
 
     if (userid_check()) {
         if (usbd_connect_pc_check()) {

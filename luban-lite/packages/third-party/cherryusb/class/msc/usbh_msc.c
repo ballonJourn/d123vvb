@@ -69,6 +69,11 @@ static int usbh_msc_get_maxlun(struct usbh_msc *msc_class, uint8_t *buffer)
 
 static int usbh_msc_reset(struct usbh_msc *msc_class)
 {
+    /* 拔盘后 hport 可能已断开或 msc_class 已被 usbh_msc_class_free 清零，
+     * 此时不能再做控制传输（否则 NULL 解引用）。 */
+    if (!msc_class || !msc_class->hport || !msc_class->hport->connected)
+        return -USB_ERR_NOTCONN;
+
     struct usb_setup_packet *setup = msc_class->hport->setup;
 
     setup->bmRequestType = USB_REQUEST_CLASS | USB_REQUEST_RECIPIENT_INTERFACE;
@@ -83,6 +88,13 @@ static int usbh_msc_reset(struct usbh_msc *msc_class)
 static int usbh_msc_clear_halt(struct usbh_msc *msc_class,
                                struct usb_endpoint_descriptor *ep_desc)
 {
+    /* DVR 线程读超时后的错误恢复会走到这里。拔盘时 hport 已断开（或被
+     * usbh_msc_class_free 清零），ep_desc 也可能随 msc_class 一起变 NULL。 */
+    if (!msc_class || !msc_class->hport || !msc_class->hport->connected)
+        return -USB_ERR_NOTCONN;
+    if (!ep_desc)
+        return -USB_ERR_INVAL;
+
     struct usb_setup_packet *setup = msc_class->hport->setup;
 
     setup->bmRequestType = USB_REQUEST_RECIPIENT_ENDPOINT;
@@ -177,7 +189,9 @@ static int usbh_bulk_cbw_csw_xfer(struct usbh_msc *msc_class, struct CBW *cbw, s
     /* Send the CBW */
     nbytes = usbh_msc_bulk_out_transfer(msc_class, (uint8_t *)cbw, USB_SIZEOF_MSC_CBW, timeout);
     if (nbytes < 0) {
-        if (nbytes == -USB_ERR_INVAL || nbytes == -USB_ERR_NOTCONN)
+        if (nbytes == -USB_ERR_INVAL || nbytes == -USB_ERR_NOTCONN ||
+            nbytes == -USB_ERR_SHUTDOWN ||
+            !msc_class->hport || !msc_class->hport->connected)
             goto __err_exit;
 
         USB_LOG_ERR("cbw transfer error, nbytes:%d\r\n", nbytes);
@@ -202,7 +216,9 @@ static int usbh_bulk_cbw_csw_xfer(struct usbh_msc *msc_class, struct CBW *cbw, s
         }
 
         if (nbytes < 0) {
-            if (nbytes == -USB_ERR_INVAL || nbytes == -USB_ERR_NOTCONN)
+            if (nbytes == -USB_ERR_INVAL || nbytes == -USB_ERR_NOTCONN ||
+                nbytes == -USB_ERR_SHUTDOWN ||
+                !msc_class->hport || !msc_class->hport->connected)
                 goto __err_exit;
             USB_LOG_ERR("msc data transfer error, nbytes:%d\r\n", nbytes);
             usbh_msc_cbw_error_dump(cbw);
@@ -220,7 +236,9 @@ static int usbh_bulk_cbw_csw_xfer(struct usbh_msc *msc_class, struct CBW *cbw, s
     memset(csw, 0, USB_SIZEOF_MSC_CSW);
     nbytes = usbh_msc_bulk_in_transfer(msc_class, (uint8_t *)csw, USB_SIZEOF_MSC_CSW, timeout);
     if (nbytes < 0) {
-        if (nbytes == -USB_ERR_INVAL || nbytes == -USB_ERR_NOTCONN)
+        if (nbytes == -USB_ERR_INVAL || nbytes == -USB_ERR_NOTCONN ||
+            nbytes == -USB_ERR_SHUTDOWN ||
+            !msc_class->hport || !msc_class->hport->connected)
             goto __err_exit;
         USB_LOG_ERR("csw transfer error, nbytes:%d\r\n", nbytes);
         usbh_msc_cbw_error_dump(cbw);

@@ -6,6 +6,7 @@
 #include <stdbool.h>
 
 void mileage_calc_init();
+void mileage_calc_sleep();
 void mileage_clear_trip();
 void mileage_clear_odo();
 bool get_mileage_state();

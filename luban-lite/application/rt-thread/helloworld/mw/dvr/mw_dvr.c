@@ -1,6 +1,6 @@
 #include <rtthread.h>
 #include <string.h>
-#include <aic_osal.h>      /* aicos_malloc / aicos_free / MEM_PSRAM_CMA */
+#include <aic_osal.h>      /* aicos_malloc / aicos_free / MEM_CMA */
 #include "mw_dvr.h"
 /* MPP decode + display path (aligned with third/carlink/src/ec_link.c) */
 #include "aic_core.h"      /* transitively required by mpp_ge.h */
@@ -42,25 +42,9 @@ static volatile uint32_t dvr_tf_total_kib = 0;
 static volatile uint32_t dvr_tf_free_kib  = 0;
 static volatile uint8_t  dvr_tf_capacity_valid = 0;
 
-// Total-time-of-clip cache: BD_CTRL_TOTAL_TIME's reply only carries the
-// index it was answering (pctrl->cmd_par) and the length (pctrl->data_len);
-// per dvr_get_total_time()'s call site, data_len itself IS the time in
-// seconds for that index (not a byte count — see BD_CTRL_TOTAL_TIME's
-// printf below, which already reported it this way before this cache
-// existed). Cache both so dvr_api_get_total_time_result() can tell the
-// caller whether the cached value is actually for the index it asked about.
-static volatile uint16_t dvr_total_time_index = 0;
-static volatile uint32_t dvr_total_time_sec   = 0;
-static volatile uint8_t  dvr_total_time_valid = 0;
-
 // DEL_FILE acknowledgement flag: set to 1 when DVR replies to a DEL_FILE command.
 // Cleared by dvr_api_clear_del_ack() before sending DEL, polled by UI after.
 static volatile uint8_t  dvr_del_ack_received = 0;
-// Last DEL_FILE reply's echoed parameter and status word, kept so the UI can
-// log / inspect what the device actually answered (the success code of the
-// status word is not documented in this protocol, so it is only recorded).
-static volatile uint16_t dvr_del_ack_par    = 0;
-static volatile uint16_t dvr_del_ack_status = 0;
 
 // DVR firmware version string cache (populated by BD_CTRL_GET_ID response).
 // NUL-terminated. 32 bytes covers typical firmware version strings; truncated if longer.
@@ -104,15 +88,14 @@ static int32_t dvr_display_width = LCD_WIDTH;   // Width of display window
 static int32_t dvr_display_height = LCD_HEIGHT; // Height of display window
 
 // Preview mode control flag (for skip jpeg decode when UI not in preview)
-// Default OFF: plugging in the DVR USB only connects + queries status in the
-// background (dvr_usb_task keeps running for that). It must NOT decode/render
-// a fullscreen passthrough preview on its own anymore — that used to bypass
-// the new ui_builder dvr_page.c UI entirely (direct GE blit onto the UI-layer
-// framebuffer, repainted ~every 10ms, which visually overwrote dvr_page.c's
-// own dock/buttons even after the UP key switched the active LVGL screen).
-// Preview now only turns on via dvr_start_preview() -> dvr_api_set_preview_enable(1),
-// i.e. only when the user opens the DVR page (home page's UP key -> dvr_page_create()).
-static uint8_t dvr_preview_enable = 0;  // 0: skip jpeg decode, 1: enable jpeg decode
+static uint8_t dvr_preview_enable = 1;  // 0: skip jpeg decode, 1: enable jpeg decode
+
+// 拔盘/停止请求独立于 cap->running：dvr_capture_init() 末尾原本无条件
+// 把 running 置 1，若 stop 恰好发生在线程初始化期间，running=0 会被覆盖，
+// 任务不会退出。用该标志在 init 收尾时重新判定。
+static volatile uint8_t dvr_stop_requested = 0;
+/* 每次拔盘/停止请求自增，用于判定“等待期间是否又发生了拔盘” */
+static volatile uint32_t dvr_stop_seq = 0;
 
 static uint8_t dvr_ui_hidden = 0;
 
@@ -143,17 +126,11 @@ static u32 dvr_fb_buf_index = 0;
 /* Bitstream buffer size: protocol allows jpg_size up to ~300 KiB
  * (see dvr_capture_get_pic_process's `jpg_size > 300*1024` guard). */
 #define DVR_BITSTREAM_BUF_SIZE  (300 * 1024)
-
-/* DVR-EXPERIMENT: hardware downscale of the MJPEG decode output (VE).
- *   0 = off  : decode at the stream size (1024x600). ABGR frame = 2.4 MB, which
- *              mpp_phy_alloc() sends to the PSRAM SW heap (> 1 MB).
- *   1 = 1/2  : 512x300 -> ABGR frame ~0.6 MB (< 1 MB, goes to the CMA heap)
- *   2 = 1/4, 3 = 1/8
- * GE then scales the small frame up to the display window in dvr_render_to_ui_layer().
- * Set to 0 to restore the original behaviour. */
-#ifndef DVR_DEC_SCALE_SHIFT
-#define DVR_DEC_SCALE_SHIFT  3
-#endif
+/* Assembled JPEG frame buffer（首块 header + 后续 jpg_size 一起拷贝到这里） */
+#define DVR_JPG_BUF_SIZE        (350 * 1024)
+/* 首帧加载超时：任务启动后超过该时间仍未成功解码/渲染过一帧，说明记录仪
+ * 没有正常出流（如无卡、初始化失败），主动停止任务，下次插拔再重试。 */
+#define DVR_LOAD_TIMEOUT_MS     (10000)
 
 // FPS print toggle (runtime, default ON). Controls whether the per-second
 // `DVR: [FPS:xx] frame_count=xx` log line is emitted. Toggled via CLI.
@@ -258,11 +235,6 @@ static int dvr_render_to_ui_layer(struct mpp_fb *fb, struct mpp_frame *frame,
     blt.dst_buf.crop.x      = (int)offset_x;
     blt.dst_buf.crop.y      = (int)offset_y;
 
-#if DVR_DEC_SCALE_SHIFT
-    /* decoded frame is smaller than the window: let GE scale it up */
-    blt.dst_buf.crop.width  = width;
-    blt.dst_buf.crop.height = height;
-#else
     if (blt.src_buf.crop.width && blt.src_buf.crop.height) {
         blt.dst_buf.crop.width  = blt.src_buf.crop.width;
         blt.dst_buf.crop.height = blt.src_buf.crop.height;
@@ -270,7 +242,6 @@ static int dvr_render_to_ui_layer(struct mpp_fb *fb, struct mpp_frame *frame,
         blt.dst_buf.crop.width  = blt.src_buf.size.width;
         blt.dst_buf.crop.height = blt.src_buf.size.height;
     }
-#endif
 
     if (dvr_ge_bitblt(&blt) < 0)
         return -1;
@@ -348,16 +319,6 @@ static int dvr_decoder_init(void)
     config.extra_frame_num       = 0;
     config.packet_count          = 1;
     config.pix_fmt               = dvr_dec_pix_fmt;
-
-#if DVR_DEC_SCALE_SHIFT
-    {
-        struct mpp_scale_ratio ratio;
-        ratio.hor_scale = DVR_DEC_SCALE_SHIFT;
-        ratio.ver_scale = DVR_DEC_SCALE_SHIFT;
-        mpp_decoder_control(dvr_mpp_dec, MPP_DEC_INIT_CMD_SET_SCALE, &ratio);
-        printf("DVR: decoder hw downscale shift=%d\n", DVR_DEC_SCALE_SHIFT);
-    }
-#endif
 
     if (mpp_decoder_init(dvr_mpp_dec, &config) < 0) {
         printf("DVR: mpp_decoder_init failed\n");
@@ -499,15 +460,15 @@ static int dvr_capture_init(st_dvr_capture_t *cap)
     cap->blksize = blksize;
 
     /* cap_blk_buf is ~410KB. The default rt_malloc heap comes from SRAM
-     * (__heap_start..__heap_end) and is only a few hundred KB on D13x, so
-     * route this large allocation to the 8MB PSRAM software heap (configured
-     * via CONFIG_AIC_PSRAM_SW_SIZE=0x800000 in the active defconfig). The
-     * matching free in dvr_capture_deinit() uses aicos_free(MEM_PSRAM_CMA, ...). */
-    cap->cap_blk_buf = (uint8_t *)aicos_malloc(MEM_PSRAM_CMA,
+     * (__heap_start..__heap_end) and is only a few hundred KB, so route this
+     * large allocation to the contiguous CMA region via MEM_CMA (DRAM CMA on
+     * boards with AIC_DRAM_CMA_EN, PSRAM CMA otherwise). The matching free in
+     * dvr_capture_deinit() uses aicos_free(MEM_CMA, ...). */
+    cap->cap_blk_buf = (uint8_t *)aicos_malloc(MEM_CMA,
                                                 blksize + 512 + 300 * 1024);  // 100KB block + extra space for jpg_size
     if (!cap->cap_blk_buf) {
         printf("DVR: alloc blk_buf failed\n");
-        aicos_free(MEM_PSRAM_CMA, cap->cap_blk_buf);   /* no-op: pointer is NULL here, kept for symmetry with deinit */
+        aicos_free(MEM_CMA, cap->cap_blk_buf);   /* no-op: pointer is NULL here, kept for symmetry with deinit */
         if (dvr_fp) {
             dfs_file_close(dvr_fp);
             rt_free(dvr_fp);
@@ -517,12 +478,12 @@ static int dvr_capture_init(st_dvr_capture_t *cap)
         return -1;
     }
 
-    /* Same MEM_PSRAM_CMA route as cap_blk_buf — 350KB also overflows the
+    /* Same MEM_CMA route as cap_blk_buf — 350KB also overflows the
      * default SRAM heap. See comment at cap_blk_buf allocation above. */
-    cap->cap_jpg_buf = (uint8_t *)aicos_malloc(MEM_PSRAM_CMA, 350 * 1024);  // 350KB to handle max jpg_size + header
+    cap->cap_jpg_buf = (uint8_t *)aicos_malloc(MEM_CMA, DVR_JPG_BUF_SIZE);
     if (!cap->cap_jpg_buf) {
         printf("DVR: alloc jpg_buf failed\n");
-        aicos_free(MEM_PSRAM_CMA, cap->cap_blk_buf);   /* was rt_malloc'd to PSRAM, must free to PSRAM too */
+        aicos_free(MEM_CMA, cap->cap_blk_buf);   /* allocated from the CMA region, free it back to the same region */
         if (dvr_fp) {
             dfs_file_close(dvr_fp);
             rt_free(dvr_fp);
@@ -541,8 +502,8 @@ static int dvr_capture_init(st_dvr_capture_t *cap)
     /* Decode + render init: opens mpp_fb + mpp_decoder (VE). */
     if (dvr_decoder_init() != 0) {
         printf("DVR: decoder init failed\n");
-        aicos_free(MEM_PSRAM_CMA, cap->cap_blk_buf);
-        aicos_free(MEM_PSRAM_CMA, cap->cap_jpg_buf);
+        aicos_free(MEM_CMA, cap->cap_blk_buf);
+        aicos_free(MEM_CMA, cap->cap_jpg_buf);
         if (dvr_fp) {
             dfs_file_close(dvr_fp);
             rt_free(dvr_fp);
@@ -553,7 +514,9 @@ static int dvr_capture_init(st_dvr_capture_t *cap)
     }
 
     cap->display_on = 0;
-    cap->running = 1;
+    /* 初始化期间可能已收到拔盘停止请求；此时不要拉回 running，让任务
+     * 初始化完就退出循环并走 deinit 关闭文件。 */
+    cap->running = dvr_stop_requested ? 0 : 1;
     printf("DVR: capture init ok, blksize=%d\n", blksize);
     return 0;
 }
@@ -567,16 +530,16 @@ static void dvr_capture_deinit(st_dvr_capture_t *cap)
 {
     cap->running = 0;
     cap->h_cap = RT_NULL;
-    /* These two large buffers were allocated from MEM_PSRAM_CMA in
+    /* These two large buffers were allocated from MEM_CMA in
      * dvr_capture_init(); freeing them on the default heap would be a
      * TLSF cross-region fault. NULL guards for safety (aicos_free on
      * a NULL pointer would otherwise depend on the underlying impl). */
     if (cap->cap_blk_buf) {
-        aicos_free(MEM_PSRAM_CMA, cap->cap_blk_buf);
+        aicos_free(MEM_CMA, cap->cap_blk_buf);
         cap->cap_blk_buf = RT_NULL;
     }
     if (cap->cap_jpg_buf) {
-        aicos_free(MEM_PSRAM_CMA, cap->cap_jpg_buf);
+        aicos_free(MEM_CMA, cap->cap_jpg_buf);
         cap->cap_jpg_buf = RT_NULL;
     }
 
@@ -699,8 +662,6 @@ static void dvr_recv_cmd_process(st_bd_ctrl_if_t *pctrl)
             printf("DVR: SET_TIME received, status=%d\n", pctrl->cmd_par);
             break;
         case BD_CTRL_DEL_FILE:
-            dvr_del_ack_par    = pctrl->cmd_par;
-            dvr_del_ack_status = pctrl->data_len;
             dvr_del_ack_received = 1;
             printf("DVR: DEL_FILE ACK received, par=0x%04X, status=%d\n", pctrl->cmd_par, pctrl->data_len);
             break;
@@ -711,9 +672,6 @@ static void dvr_recv_cmd_process(st_bd_ctrl_if_t *pctrl)
             printf("DVR: UNLOCK_FILE received, index=%d, status=%d\n", pctrl->cmd_par, pctrl->data_len);
             break;
         case BD_CTRL_TOTAL_TIME:
-            dvr_total_time_index = pctrl->cmd_par;
-            dvr_total_time_sec   = (uint32_t)pctrl->data_len;
-            dvr_total_time_valid = 1;
             printf("DVR: TOTAL_TIME received, index=%d, time=%d sec\n", pctrl->cmd_par, pctrl->data_len);
             break;
         case BD_CTRL_GET_TF_CAPACITY:
@@ -961,10 +919,13 @@ static int dvr_capture_get_pic_process(st_dvr_capture_t *cap)
 
     /* Copy header part to jpeg buffer (skip BD_JPG_OFFSET = 17) */
     nb = cap->blksize - BD_JPG_OFFSET;
-    if (nb > 300 * 1024) {
-        #if JPEG_DEBUG_PRINT
-        printf("DVR: block size too large: %d\n", nb);
-        #endif
+    /* 首块 header 占 nb 字节，后续还要在 cap_jpg_buf + nb 处再拷贝
+     * jpg_size 字节；两者之和不得超过缓冲容量，否则会写出堆块。 */
+    if (nb > DVR_JPG_BUF_SIZE || nb + jpg_size > DVR_JPG_BUF_SIZE) {
+        printf("DVR: jpeg frame too large: header=%lu rest=%lu cap=%lu\n",
+               (unsigned long)nb, (unsigned long)jpg_size,
+               (unsigned long)DVR_JPG_BUF_SIZE);
+        dfs_file_lseek(fp, fp->pos + (off_t)(100 * 1024));
         return -1;
     }
     memcpy(cap->cap_jpg_buf, cap->cap_blk_buf + BD_JPG_OFFSET, nb);
@@ -1073,7 +1034,6 @@ static void dvr_usb_task(void *arg)
         return;
     }
 
-
     // Send MIC on command once on startup
     // dvr_send_normal_cmd(BD_CTRL_MIC_ON, 0);
 
@@ -1088,6 +1048,8 @@ static void dvr_usb_task(void *arg)
 
     uint32_t last_switch_time = 0;
     uint32_t current_time;
+    /* 首帧加载超时的计时起点（预览关闭期间会刷新，不计时） */
+    uint32_t load_tick = rt_tick_get();
 #if DVR_FRAMERATE_PRINT
     dvr_last_stat_time = rt_tick_get();
     dvr_frame_count = 0;
@@ -1145,31 +1107,6 @@ static void dvr_usb_task(void *arg)
                     printf("DVR: auto-rec gave up after 3 retries (SD not ready)\n");
                 }
             }
-
-            /* System health report every 30 seconds */
-            static uint32_t diag_interval = 0;
-            if (++diag_interval >= 30) {
-                diag_interval = 0;
-                /* fb queue status */
-                extern void fb_diag_get_counts(int*, int*, uint32_t*, uint32_t*);
-                int fb_free_n = 0, fb_ready_n = 0;
-                uint32_t vsync_n = 0, no_ready_n = 0;
-                fb_diag_get_counts(&fb_free_n, &fb_ready_n, &vsync_n, &no_ready_n);
-                /* FreeRTOS heap */
-                rt_size_t heap_total = 0, heap_used = 0, heap_max = 0;
-                rt_memory_info(&heap_total, &heap_used, &heap_max);
-                size_t heap_free = (size_t)heap_total - (size_t)heap_used;
-                size_t heap_min  = (size_t)heap_total - (size_t)heap_max;
-                printf("[DIAG-SYS] tick=%lu fb:free=%d,ready=%d "
-                       "vsync=%lu no_rdy=%lu "
-                       "heap:cur=%u,min=%u "
-                       "dvr_prev=%d\n",
-                       (unsigned long)current_time,
-                       fb_free_n, fb_ready_n,
-                       (unsigned long)vsync_n, (unsigned long)no_ready_n,
-                       (unsigned)heap_free, (unsigned)heap_min,
-                       (int)dvr_preview_enable);
-            }
         }
 #endif
 
@@ -1184,6 +1121,22 @@ static void dvr_usb_task(void *arg)
                 // Use send_normal_cmd to set flag, actual send happens in next loop iteration
                 dvr_send_normal_cmd(BD_ANDROID_VIEW_SWITCH, dvr_view_mode);
             }
+        }
+
+        /* 首帧加载超时：预览开启但一直没出过画面（cap->display_on == 0）
+         * 时，说明记录仪没有正常出流（无卡、初始化失败、elene 数据无效等）。
+         * 主动停止任务并走正常 deinit，避免半死不活地一直占用资源和带宽。
+         * 预览关闭期间刷新计时起点，不计入超时。 */
+        if (!dvr_preview_enable) {
+            load_tick = rt_tick_get();
+        } else if (!cap->display_on &&
+                   (rt_tick_get() - load_tick) >=
+                       rt_tick_from_millisecond(DVR_LOAD_TIMEOUT_MS)) {
+            printf("DVR: no video frame in %d ms, stop task (load failed)\n",
+                   DVR_LOAD_TIMEOUT_MS);
+            dvr_stop_requested = 1;
+            cap->running = 0;
+            break;
         }
 
         /* Yield CPU. When not in preview, sleep longer to avoid
@@ -1212,12 +1165,24 @@ void dvr_start_if_elene_exists(void)
         return;
     }
 
+    /* 若 stop 请求已经到来（拔盘 / 上一次会话未清），不要再启动。 */
+    if (dvr_stop_requested) {
+        printf("DVR: start skipped (stop requested)\n");
+        return;
+    }
+
     if (!dvr_check_elene_exist()) {
         printf("DVR: elene not found\n");
         return;
     }
 
     printf("DVR: elene found, starting task\n");
+
+    /* 上一次拔盘/停预览把门控置 0；重新插入时必须恢复，否则线程启动后
+     * 不解码、VEH_DVR_PLAYING 永远不会置 1，UI 也就不会切到 DVR 页。
+     * 注意不要在这里清 dvr_stop_requested：若拔盘在启动之后立刻到达，
+     * dvr_capture_init 收尾需要靠它避免把 running 拉回 1。 */
+    dvr_preview_enable = 1;
 
     dvr_capture.running = 0;
     dvr_capture.h_cap = NULL;
@@ -1699,24 +1664,10 @@ uint8_t dvr_api_is_del_ack(void)
     return dvr_del_ack_received;
 }
 
-// DVR control API - Read the DEL_FILE ACK together with the parameter and
-// status word the device replied with. Returns 1 if an ACK is pending.
-uint8_t dvr_api_get_del_ack(uint16_t *par_out, uint16_t *status_out)
-{
-    if (!dvr_del_ack_received) return 0;
-    if (par_out)    *par_out    = dvr_del_ack_par;
-    if (status_out) *status_out = dvr_del_ack_status;
-    return 1;
-}
-
-// DVR control API - Clear DEL_FILE ACK flag (call before sending DEL, and
-// again when giving up on a timed-out delete so a late ACK can't be mistaken
-// for the next one's)
+// DVR control API - Clear DEL_FILE ACK flag (call before sending DEL)
 void dvr_api_clear_del_ack(void)
 {
     dvr_del_ack_received = 0;
-    dvr_del_ack_par      = 0;
-    dvr_del_ack_status   = 0;
 }
 
 // DVR control API - Start recording
@@ -1864,32 +1815,6 @@ void dvr_api_get_total_time(uint16_t index)
     dvr_get_total_time(index);
 }
 
-// DVR control API - Read the most recently received TOTAL_TIME reply.
-//   index:        the file index to check the cached reply against.
-//   seconds_out:  out-param (may be NULL); set to the cached seconds on match.
-//   Returns 1 if a reply for THIS index is cached (seconds_out is valid),
-//   0 otherwise (no reply yet, or the cached one is for a different index —
-//   the reply is async, so a stale value from a previous query must not be
-//   mistaken for this one's answer). Caller should have called
-//   dvr_api_get_total_time(index) first and polled this afterwards.
-uint8_t dvr_api_get_total_time_result(uint16_t index, uint32_t *seconds_out)
-{
-    if (!dvr_total_time_valid || dvr_total_time_index != index) {
-        return 0;
-    }
-    if (seconds_out) *seconds_out = dvr_total_time_sec;
-    return 1;
-}
-
-// DVR control API - Drop the cached TOTAL_TIME reply. Call right before
-// dvr_api_get_total_time(): the reply only echoes the index, and the same
-// index can name a different clip on the front/rear tab, so a stale cached
-// value must not be returned for the new query.
-void dvr_api_clear_total_time(void)
-{
-    dvr_total_time_valid = 0;
-}
-
 // DVR control API - Fast forward playback
 void dvr_api_pb_ff(void)
 {
@@ -1993,9 +1918,9 @@ uint8_t dvr_api_get_fps_print(void)
 // DVR preview lifecycle - called by dvr_page_init() when DVR window opens
 void dvr_start_preview(void)
 {
-    dvr_api_set_display_window(0, 0, 1024, 600);
+    dvr_api_set_display_window(0, 0, LCD_WIDTH, LCD_HEIGHT);
     dvr_api_set_preview_enable(1);
-    printf("DVR: start_preview (window 0,0,1024,600)\n");
+    printf("DVR: start_preview (window 0,0,%d,%d)\n", LCD_WIDTH, LCD_HEIGHT);
 }
 
 // DVR preview lifecycle - called by dvr_page BACK key / window close
@@ -2032,24 +1957,93 @@ uint8_t dvr_is_device_online(void)
     return (dvr_task_handle != RT_NULL) ? 1 : 0;
 }
 
+/* 拔盘/停止预览：非阻塞地让 DVR 线程退出。
+ *
+ * 调用上下文是 usbh_msc_stop（cherryusb disconnect 线程，持有 hport
+ * mutex），因此这里不能等待线程收尾：DVR 线程读失败后的
+ * reset/clear_halt 会走 control transfer，需要同一把 hport mutex，等待
+ * 会死锁。这里只做三件事：
+ *   1. 关预览门控，线程下一轮（≤2ms）不再解码/写 fb；
+ *   2. running=0，线程跳出主循环后自己走 dvr_capture_deinit()
+ *      （关闭 /udisk/elene 的 dfs_fd、释放 CMA buffer、deinit 解码器）；
+ *   3. 立即恢复 UI：UI 侧轮询 VEH_DVR_PLAYING 后切回主页，不等线程收尾。 */
+void dvr_usb_stop(void)
+{
+    dvr_stop_requested = 1;
+    dvr_stop_seq++;
+    dvr_preview_enable = 0;
+    dvr_capture.running = 0;
+
+    if (dvr_ui_hidden) {
+        dvr_ui_hidden = 0;
+        vehicle_set_data(VEH_DVR_PLAYING, 0);
+    }
+}
+
+/* 任务句柄为 NULL 且 elene 已关闭，说明 DVR 线程已经走完
+ * dvr_capture_deinit()（关闭 dfs_fd、释放 CMA buffer、deinit 解码器）。
+ * 拔盘后的 unmount 必须等这个条件成立。 */
+uint8_t dvr_usb_is_stopped(void)
+{
+    return (dvr_task_handle == RT_NULL && dvr_fp == NULL) ? 1 : 0;
+}
+
 /* Idempotent: looks up current MSC instances and starts/stops the DVR task
  * accordingly. Called from the monitor thread context only. */
 void dvr_usb_eval_and_apply(bool state)
 {
-    if (state) {
-        int tries = 0;
-        const int max_tries = 10;
-        while (tries < max_tries) {
-            if (dvr_check_elene_exist()) {
-                break;
-            }
-            tries++;
-            rt_thread_mdelay((rt_uint32_t)(tries * 100));  /* 100,200,...,1000ms */
-        }
-        dvr_start_if_elene_exists();  /* final idempotent kick-off */
-    } else {
-        dvr_capture.running = 0;
+    uint32_t seq;
+    int tries;
+    const int max_tries = 10;
+
+    if (!state) {
+        dvr_usb_stop();
+        return;
     }
+
+    seq = dvr_stop_seq;
+
+    /* 快速重插：上一会话的线程可能还在收尾。本函数运行在挂载 worker
+     * 线程（不持 hport mutex），可以安全等待，避免 dvr_task_handle
+     * 非空导致本次插入永远起不来画面。 */
+    if (!dvr_usb_is_stopped()) {
+        if (!dvr_stop_requested) {
+            /* 同一会话仍在预览，不需要重复启动 */
+            printf("DVR: task already running\n");
+            return;
+        }
+        for (tries = 0; tries < 100 && !dvr_usb_is_stopped(); tries++) {
+            if (dvr_stop_seq != seq) {
+                break;  /* 等待期间又拔了一次，直接走取消流程 */
+            }
+            rt_thread_mdelay(10);
+        }
+        if (dvr_stop_seq != seq || !dvr_usb_is_stopped()) {
+            printf("DVR: start cancelled (previous task not exited)\n");
+            return;
+        }
+    }
+
+    /* 新会话：清掉上一次拔盘留下的停止请求。之后若拔盘到来，
+     * dvr_stop_seq 会自增，下面的检查会取消本次启动。 */
+    dvr_stop_requested = 0;
+
+    for (tries = 0; tries < max_tries; tries++) {
+        if (dvr_stop_seq != seq) {
+            printf("DVR: start cancelled (usb removed)\n");
+            return;
+        }
+        if (dvr_check_elene_exist()) {
+            break;
+        }
+        rt_thread_mdelay((rt_uint32_t)((tries + 1) * 100));  /* 100..1000ms */
+    }
+
+    if (dvr_stop_seq != seq) {
+        printf("DVR: start cancelled (usb removed)\n");
+        return;
+    }
+    dvr_start_if_elene_exists();  /* final idempotent kick-off */
 }
 
 #endif

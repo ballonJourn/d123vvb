@@ -123,24 +123,17 @@ void lv_draw_sw_arc(lv_draw_unit_t * draw_unit, const lv_draw_arc_dsc_t * dsc, c
         blend_dsc.color = dsc->color;
     }
     else {
-        /* backport of LVGL v9.2.0: do not use a failed decode */
-        lv_result_t res = lv_image_decoder_open(&decoder_dsc, dsc->img_src, NULL);
-        if(res == LV_RESULT_INVALID || decoder_dsc.decoded == NULL) {
-            LV_LOG_WARN("Can't decode the background image");
-            blend_dsc.color = dsc->color;
-        }
-        else {
-            img_area.x1 = 0;
-            img_area.y1 = 0;
-            img_area.x2 = decoder_dsc.decoded->header.w - 1;
-            img_area.y2 = decoder_dsc.decoded->header.h - 1;
-            int32_t ofs = decoder_dsc.decoded->header.w / 2;
-            lv_area_move(&img_area, dsc->center.x - ofs, dsc->center.y - ofs);
-            blend_dsc.src_area = &img_area;
-            blend_dsc.src_buf = decoder_dsc.decoded->data;
-            blend_dsc.src_color_format = decoder_dsc.decoded->header.cf;
-            blend_dsc.src_stride = decoder_dsc.decoded->header.stride;
-        }
+        lv_image_decoder_open(&decoder_dsc, dsc->img_src, NULL);
+        img_area.x1 = 0;
+        img_area.y1 = 0;
+        img_area.x2 = decoder_dsc.decoded->header.w - 1;
+        img_area.y2 = decoder_dsc.decoded->header.h - 1;
+        int32_t ofs = decoder_dsc.decoded->header.w / 2;
+        lv_area_move(&img_area, dsc->center.x - ofs, dsc->center.y - ofs);
+        blend_dsc.src_area = &img_area;
+        blend_dsc.src_buf = decoder_dsc.decoded->data;
+        blend_dsc.src_color_format = decoder_dsc.decoded->header.cf;
+        blend_dsc.src_stride = decoder_dsc.decoded->header.stride;
     }
 
     lv_opa_t * circle_mask = NULL;

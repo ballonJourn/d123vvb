@@ -31,7 +31,11 @@ typedef struct {
     uint16_t avg_elec_cons;  ///< 平均电耗kw/100km
     uint32_t all_elec_cons;  ///< 累计电耗kw
     uint32_t erase_counter;  ///< 里程相关信息擦除次数:次
-    uint32_t reserve[5];      ///< 预留20字节
+    uint32_t nfc_uid1;       ///< NFC UID 1
+    uint32_t nfc_uid2;       ///< NFC UID 2
+    uint32_t wireless_key1;  ///< WIRELESS KEY1
+    uint32_t wireless_key2; ///< WIRELESS KEY2
+    uint32_t reserve;      ///< 预留20字节
     uint32_t checksum;       ///< 检验位
 } mile_param_t;  ///< 48字节
 
@@ -47,9 +51,24 @@ typedef enum {
     MILE_PARAM_RIDE_TIME,
     MILE_PARAM_AVG_ELEC_CONS,
     MILE_PARAM_RANGE,
+    MILE_PARAM_NFC_UID1,
+    MILE_PARAM_NFC_UID2,
+    MILE_PARAM_WIRELESS_KEY1,
+    MILE_PARAM_WIRELESS_KEY2,
 } mile_param_handle_e;
 
+/**
+ * @brief  写里程参数: 下电中(见 power_is_off_pending())直接丢弃不落盘
+ * @return true:已受理(含下电中被丢弃) false:参数无效/队列异常
+ */
 bool set_mile_param(mile_param_handle_e id, void *param);
+
+/**
+ * @brief  写里程参数(强制): 忽略下电闸门, 仅供下电流程自身使用
+ * @return true:成功 false:失败
+ */
+bool set_mile_param_force(mile_param_handle_e id, void *param);
+
 bool get_mile_param(mile_param_handle_e id, void *param);
 bool get_recovery_mile_param(void);
 

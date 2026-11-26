@@ -15,6 +15,8 @@ typedef enum
     CLICK_LONG_SET,
     CLICK_LONG_BACK,
 
+    CLICK_SHORT_HOME,
+
     CLICK_END,
 }click_e ;
 

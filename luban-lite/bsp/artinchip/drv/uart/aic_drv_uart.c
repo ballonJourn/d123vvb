@@ -534,6 +534,12 @@ static void drv_uart_callback(aic_usart_priv_t *uart, void *arg)
 
     case AIC_UART_RX_INT:
         rx_fifo = (struct rt_serial_rx_fifo *)g_serial[uart->idx].serial_rx;
+        /* 设备已 close 时 serial_rx 已被释放并置 NULL, 但本驱动的
+         * RT_DEVICE_CTRL_CLR_INT 不处理 DMA_RX, 接收 DMA 通道仍可能
+         * 上报一次完成中断. 此时直接忽略, 由 hal_uart_dma_rx_callback
+         * 继续把 DMA 通道停掉并释放, 不要再去碰 rx_fifo / UART 寄存器. */
+        if (rx_fifo == RT_NULL)
+            break;
         aicos_dcache_invalid_range((void *)g_info[uart->idx].uart_rx_fifo, AIC_UART_RX_FIFO_SIZE);
         if (rx_fifo->put_index + g_info[uart->idx].rx_size < g_serial[uart->idx].config.bufsz) {
             memcpy((rx_fifo->buffer + rx_fifo->put_index), (rt_uint8_t *)g_info[uart->idx].uart_rx_fifo, g_info[uart->idx].rx_size);

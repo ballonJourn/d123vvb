@@ -9,12 +9,19 @@
 #include "vehicle_data.h"
 #include "vehicle_argument.h"
 #include "vehicle_mile.h"
-#include "vehicle_param.h"
 #include "mileage_calc.h"
+#include "ref_mileage_calc.h"
 #include "window_manager.h"
 #include "button_manager.h"
 #include "key_common.h"
+#include "mode_view.h"       /* home_refresh_mode_index */
+#include "power_view.h"
 #include "dev_config.h"
+#include "ui_theme.h"
+#include "display.h"
+#include "pop_tip_manager.h"
+#include "language.h"        /* language_option_to_lang_type（开机语言恢复用） */
+#include "mw_wdt.h"
 
 #define REFRESH_INTERVAL_50_MS   (50)
 #define REFRESH_INTERVAL_200_MS  (200)
@@ -32,21 +39,54 @@ void home_logic_init()
     home_timer_init();
 
     mileage_calc_init();
+    ref_mileage_calc_init();
     
-#if MW_ADC_KEY_ENABLE
+#if MW_ADC_KEY_ENABLE || MW_IO_KEY_ENABLE || MW_CAN_IO_KEY_ENABLE
     set_key_event_cb(button_manager_event) ;
 #endif
 
     return  ;
 }
 
-void home_timer_init() 
+void home_timer_init()
 {
     timer_array[REFRESH_TIMER_50_MS ] = lv_timer_create( timer_refresh_50_ms ,   REFRESH_INTERVAL_50_MS ,NULL ) ;
-    timer_array[REFRESH_TIMER_200_MS] = lv_timer_create( global_data_init    ,   REFRESH_INTERVAL_200_MS,  NULL ) ;
     timer_array[REFRESH_TIMER_500_MS] = lv_timer_create( timer_refresh_500_ms,   REFRESH_INTERVAL_500_MS ,NULL ) ;
 
     return  ;
+}
+
+/* global_data_init(参数恢复) 的启动时机由动画结束后提前到开机动画预加载：
+ * 主界面创建后即轮询恢复单位/里程参数，用动画剩余帧时间消化。
+ * 保留 200ms 轮询 + 完成后自删机制，recovery 未就绪时继续等待，
+ * 确保最终能拿到正确保存的参数。由 boot_animation_preload_cb 调用。 */
+void boot_recovery_timer_start()
+{
+    if (timer_array[REFRESH_TIMER_200_MS] == NULL) {
+        timer_array[REFRESH_TIMER_200_MS] = lv_timer_create(global_data_init, REFRESH_INTERVAL_200_MS, NULL);
+    }
+}
+
+/* 续航里程: 无效(三包 SOC 全 ≤5%)时传 -1 让 view 层显示 "--km"。
+ * 单位换算在 logic 层做完再传纯数值 (与 odo/trip 同一约定) */
+static void global_refresh_range()
+{
+    unit_e unit = (MPH == vehicle_get_param_unit()) ? MPH : KM_H ;
+
+    if (!ref_mileage_display_valid())
+    {
+        home_refresh_range(-1, unit) ;
+        return ;
+    }
+
+    uint32_t u32_km = ref_mileage_total_x10() / 10 ;   // 0.1km → km
+    if (MPH == unit)
+    {
+        u32_km *= KM_CONVERT_MILE ;
+    }
+    home_refresh_range((int32_t)u32_km, unit) ;
+
+    return ;
 }
 
 void global_refresh_mileage()
@@ -64,53 +104,62 @@ void global_refresh_mileage()
     home_refresh_odo ((double)u32_odo) ;
     home_refresh_trip((double)u32_tripA) ;
 
+    // 续航里程: 一并覆盖"数据变化"与"切单位/开机恢复"两条路径
+    global_refresh_range() ;
+
     // if()
     return ;
 }
 
 void global_refresh_unit(uint8_t unit)
 {
-    // 速度
-    // int32_t value ;
-    // value = vehicle_get_data_speed() ;
-    // if (MPH == vehicle_get_param_unit())
-    //         value *= KM_CONVERT_MILE ; 
-    // home_refresh_speed(value) ;
-    // home_refresh_unit(unit);
+    // 速度：单位文本 + 数字位图（数字按新单位重绘，不依赖车速变化）
+    home_refresh_speed_unit(unit);
+    home_refresh_speed(speed_view_current());
 
     global_refresh_mileage();
     home_refresh_mileage_unit(unit) ;
     home_refresh_electrical_unit(unit) ;
 }
 
+/* 切语言：先落全局语言（后续字体解析才指向新语言），再刷主界面静态文案与字体，
+ * 最后复用 global_refresh_unit 把实时值/单位写回 —— home_page_update_current_language
+ * 只重设字体、不写实时值，故必须补这一次，否则 trip/odo 与单位文本不会更新 */
+void global_refresh_language(lang_type_t lang)
+{
+    aic_set_language(lang);
+    home_page_update_current_language();
+    global_refresh_unit(vehicle_get_param_unit());
+}
+
 void global_data_init(lv_timer_t *info)
 {
     // printf("===================");
     (void)info ;
-    
+
     static bool is_init_usr_param  = false ;
     static bool is_init_mile_param = false ;
-    
+
     if (!is_init_usr_param && (true == vehicle_get_param_recovery()))
     {
         uint8_t value  ;
 
+        // 语言：按已存选项恢复（否则重启后 UI 回英文，与设置页焦点指向的选项不符）。
+        // 此处只落语言 + 刷主界面文案字体；单位/实时值由下面的 global_refresh_unit 负责
+        aic_set_language(language_option_to_lang_type(vehicle_get_param_language()));
+        home_page_update_current_language();
+
         // 设置单位 // 设置里程程息 、 剩余里程
         value = vehicle_get_param_unit() ;
         global_refresh_unit(value);
-        
-        // //显示主题 0：白天 1:黑夜 2:自动
-        // value = vehicle_get_param_display();
-        // if (0 == value)
-        //     global_refresh_display(DIAPLAY_DAY_OPTION);
-        // else if(1 == value)
-        //     global_refresh_display(DIAPLAY_NIGHT_OPTION);
-        // else 
-        //     global_refresh_display(vehicle_get_data_current_display()) ;
-        
+
+        // 显示主题：自动模式取中间层光感算出的实际模式
+        global_refresh_display(vehicle_get_cur_display_mode() == VEHICLE_DISPLAY_MODE_NIGHT
+                               ? DIAPLAY_NIGHT_OPTION : DIAPLAY_DAY_OPTION);
+
         // refresh_ver(veicle_get_data_version());
 
-        is_init_usr_param = true ; 
+        is_init_usr_param = true ;
 
         LV_LOG_USER("vehicle_get_param_recovery successed \n");
     }
@@ -146,8 +195,12 @@ void timer_refresh_500_ms(lv_timer_t *info)
     //时间刷新闪烁
     (void)info ;
     
-    if (checkself_get_state() != CHECK_STATE_FINISHED /*|| get_demonstration_state()*/ ) 
+    if (checkself_get_state() != CHECK_STATE_FINISHED /*|| get_demonstration_state()*/ )
         return  ;
+
+    /* 顶部 BAT 电压在设置弹窗（WINDOW_MENU）下仍可见：设置弹窗挂在 home 上，
+     * 必须在 WINDOW_MAIN 门控之前刷新，否则进设置后电压定格 */
+    home_refresh_battery_voltage(vehicle_get_battery_voltage());
 
     if(WINDOW_MAIN != window_manager_get())
         return ;
@@ -192,9 +245,7 @@ void timer_refresh_500_ms(lv_timer_t *info)
         
     //     update_state = state ;
     // }
-    
 
-    
     return  ;
 }
 
@@ -203,7 +254,7 @@ void signal_view_update()
     for (size_t i = 0; i < ICON_SIGNAL_NUM_MAX; i++)
     {
         int32_t state =  vehicle_get_data_signal_lamp( i )  ;
-        home_refresh_signal(i , !!state);
+        home_refresh_signal(i , state);
     }
 
     return ;
@@ -214,17 +265,50 @@ void signal_view_update()
 void timer_refresh_50_ms(lv_timer_t *info)
 {
     (void)info ;
-    
-    if (checkself_get_state() != CHECK_STATE_FINISHED /*|| get_demonstration_state()*/ ) 
+
+    /* LVGL 心跳: 本定时器由 LVGL 线程的 lv_timer_handler 驱动,
+     * 放在自检门控之前, 自检期间也能证明 LVGL 线程仍在调度 */
+    mw_wdt_feed(MW_WDT_HB_LVGL);
+
+    if (checkself_get_state() != CHECK_STATE_FINISHED /*|| get_demonstration_state()*/ )
         return  ;
-    
-    int __dvr = vehicle_get_data(VEH_DVR_PLAYING) ;
-    home_page_set_visible(__dvr == 0) ;
+
+    /* DVR 接入/拔出轮询：中间层首帧成功写入 UI layer 后置
+     * VEH_DVR_PLAYING=1，拔盘/停预览后置 0。
+     * 放在 WINDOW_MAIN 门控之前，任何页面下都能响应设备插拔。
+     * 进入时先开预览再切页，切页后 LVGL 只画一次黑底；退出时先关
+     * 预览门控，回到 home 的全屏重绘会覆盖 DVR 最后一帧。 */
+    if (vehicle_get_dvr_playing()) {
+        if (window_manager_get() != WINDOW_DVR) {
+            vehicle_dvr_preview_start();
+            window_manager_set_target(WINDOW_DVR);
+        }
+    } else if (window_manager_get() == WINDOW_DVR) {
+        vehicle_dvr_preview_stop();
+        window_manager_set_target(WINDOW_MAIN);
+    }
 
     button_manager_refresh();
 
+    /* CAN 故障弹窗轮询: 在 WINDOW_MAIN 门控之前, 使任何界面都能弹出 */
+    pop_tip_poll();
+
+    /* 自动主题跟随光感: 传 AUTO 由 ui_theme_apply 解析实际模式,
+     * 内部按已生效主题去重, 故仅在光感跨档时才真正切主题 */
+    if (vehicle_get_param_display() == VEHICLE_DISPLAY_MODE_AUTO)
+        global_refresh_display(DIAPLAY_AUTO_OPTION);
+
     int32_t value = vehicle_get_data_speed();
+
+    /* 设置弹窗打开时车速非 0：强制回主界面（行驶中不允许停留在设置页） */
+    if (window_manager_get() == WINDOW_MENU && value != 0)
+        window_manager_set_target(WINDOW_MAIN);
+
+    value = (value * 105 + 99) / 100;   //国标要求仪表速度比实际速度大，目前换算为1.05倍并向上取整
     speed_view_run(value) ;
+    power_view_run((int)vehicle_get_data_power());
+
+    signal_view_update();
 
     if(WINDOW_MAIN != window_manager_get())
         return ;
@@ -235,17 +319,32 @@ void timer_refresh_50_ms(lv_timer_t *info)
         set_mileage_state(false);
     }
 
+    if(get_ref_mileage_state())
+    {
+        global_refresh_range();
+        set_ref_mileage_state(false);
+    }
+
     if (vehicle_get_mile_changed() && (vehicle_get_data_speed() == 0 ) )
         on_mileage_changed();
     
     // bluetooth_view_update();
     
     home_refresh_speed(speed_view_current()) ;
+    home_refresh_speed_power((uint32_t)power_view_current());
 
-    value = vehicle_get_data_remain_battary();
-    home_refresh_electrical( value );
-    
-    signal_view_update();
+    /* 电量弧 + 电池指针：1/2/3 号包 SOC 各自独立刷新（BMS P1/P2/P3） */
+    home_refresh_battery(vehicle_get_data_bat_soc(1),
+                         vehicle_get_data_bat_soc(2),
+                         vehicle_get_data_bat_soc(3));
+
+
+    /* 驾驶模式选中态跟随 CAN: 取 mode_index_e 索引（0 normal / 1 eco / 2 sport） */
+    home_refresh_mode_index(vehicle_get_data_mode_index());
+
+    /* 挡位显示: gear_e 数值即 CAN 原始编码 (raw0/1→P, 2→D, 3→R);
+     * 非法值(负/超界)由 home_refresh_gear 兜底, 默认显示 GEAR_P */
+    home_refresh_gear((gear_e)vehicle_get_data_gear());
 
     return  ;
 }

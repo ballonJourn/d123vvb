@@ -92,13 +92,10 @@ RANLIBCOM = '')
 env.PrependENVPath('PATH', rtconfig.EXEC_PATH)
 
 # add --start-group and --end-group for GNU GCC
-# Use a response file (gcc @file) on every host when the command line gets long.
-# On Linux SCons runs the link as `sh -c "<cmd>"`, and a single argv string is
-# capped at 128 KiB (MAX_ARG_STRLEN): with NimBLE + ble_navi the object list
-# exceeds it ("sh: Argument list too long").
+# 统一走 TEMPFILE(响应文件): 链接命令行长度已接近 Linux 单参数上限
+# MAX_ARG_STRLEN(131072 字节, sh -c 把整条命令当一个参数), 再增删几个
+# 目标文件就会报 "sh: Argument list too long"。Windows 分支原本就需要它。
 env['LINKCOM'] = "${TEMPFILE('$LINK -o $TARGET $LINKFLAGS $__RPATH $SOURCES $_LIBDIRFLAGS -Wl,--whole-archive -Wl,--start-group $_LIBFLAGS -Wl,--end-group -Wl,--no-whole-archive','$LINKCOMSTR')}"
-if sys.platform != "win32":
-    env['MAXLINELENGTH'] = 100000
 env['ASCOM'] = env['ASPPCOM']
 
 # signature database

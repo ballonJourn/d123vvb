@@ -7,7 +7,6 @@
 #include "selfcheck.h"
 #include "key_common.h"
 #include "dev_config.h"
-#include "dvr_page.h"
 
 typedef enum {
   BUTTON_STATE_CALL,
@@ -48,9 +47,6 @@ static void handle_non_call_state() {
     case WINDOW_MOBILE:
         phone_manager_click(current_click);
         break;
-    case WINDOW_DEVICE:
-        dvr_manager_click(current_click);
-        break;
     default:
         break;
     }
@@ -87,7 +83,7 @@ void button_manager_event(uint8_t id)
     if (current_click != CLICK_END)
         return;
 
-#if MW_ADC_KEY_ENABLE
+#if MW_ADC_KEY_ENABLE || MW_IO_KEY_ENABLE || MW_CAN_IO_KEY_ENABLE
     switch (id) 
     {
       case UP_KEY_SHORT_PR:
@@ -102,13 +98,19 @@ void button_manager_event(uint8_t id)
       case BACK_KEY_SHORT_PR:
         current_click = CLICK_SHORT_BACK;
         break;
+      case BACK_KEY_LONG_PR:
+        current_click = CLICK_LONG_BACK;
+        break;
       case SET_KEY_LONG_PR :
         current_click = CLICK_LONG_SET;
+        break;
+      case HOME_KEY_SHORT_PR:
+        current_click = CLICK_SHORT_HOME;
         break;
       default:
         break;
     }
 #endif
 
-    LV_LOG_WARN("Event ID = %u processed.", id);
+    // LV_LOG_WARN("Event ID = %u processed.", id);
 }

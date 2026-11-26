@@ -132,10 +132,8 @@ int dfs_file_close(struct dfs_fd *fd)
     if (fd->fops != NULL && fd->fops->close != NULL)
         result = fd->fops->close(fd);
 
-    /* close fd error, return */
-    if (result < 0)
-        return result;
-
+    /* Release the path buffer even if the fs-specific close failed (e.g.
+     * hot-unplug): returning early here leaks fd->path. */
     if (fd->path != NULL) {
         rt_free(fd->path);
         fd->path = NULL;

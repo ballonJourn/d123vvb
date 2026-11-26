@@ -151,21 +151,6 @@ if LPKG_USING_NIMBLE
             config LPKG_NIMBLE_HCI_UART_DEVICE_NAME
                 string "The uart for HCI Transport"
                 default "uart1"
-
-            config LPKG_NIMBLE_HCI_UART_RX_BUFSZ
-                int "HCI uart rx ring buffer size (bytes)"
-                default 4096
-                help
-                  Set on this uart only, before it is opened. At 1.5 Mbps
-                  64 bytes last ~0.4 ms; 4096 bytes ~27 ms.
-
-            config LPKG_NIMBLE_HCI_UART_RX_THREAD_PRIORITY
-                int "hci_uart_rx thread priority"
-                default 24
-                help
-                  Lower number = higher priority. Must run before busy
-                  threads such as LVGL (LPKG_LVGL_THREAD_PRIO), otherwise the
-                  rx ring overflows during their work.
         endif
 
     endmenu

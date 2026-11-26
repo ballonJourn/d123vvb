@@ -1234,11 +1234,6 @@ int rt_wlan_get_rssi(void)
 
 rt_err_t rt_wlan_start_ap(const char *ssid, const char *password)
 {
-    return rt_wlan_start_ap_channel(ssid, password, RT_WLAN_AP_DEFAULT_CHANNEL);
-}
-
-rt_err_t rt_wlan_start_ap_channel(const char *ssid, const char *password, int channel)
-{
     rt_err_t err = RT_EOK;
     int ssid_len = 0;
     struct rt_wlan_info info;
@@ -1250,19 +1245,9 @@ rt_err_t rt_wlan_start_ap_channel(const char *ssid, const char *password, int ch
         return -RT_EIO;
     }
     if (ssid == RT_NULL) return -RT_EINVAL;
-    if (!rt_wlan_ap_channel_is_valid(channel))
-    {
-        RT_WLAN_LOG_E("channel %d is not supported for an access point", channel);
-        return -RT_EINVAL;
-    }
-    /* An access point that is already up on another channel is restarted on the new one. */
-    if (rt_wlan_ap_is_active() && _ap_mgnt.info.channel != channel)
-    {
-        rt_wlan_ap_stop();
-    }
 
     rt_memset(&info, 0, sizeof(struct rt_wlan_info));
-    RT_WLAN_LOG_D("%s is run ssid:%s password:%s channel:%d", __FUNCTION__, ssid, password, channel);
+    RT_WLAN_LOG_D("%s is run ssid:%s password:%s", __FUNCTION__, ssid, password);
     if (password)
     {
         info.security = SECURITY_WPA2_AES_PSK;
@@ -1276,8 +1261,8 @@ rt_err_t rt_wlan_start_ap_channel(const char *ssid, const char *password, int ch
     /* copy info */
     rt_memcpy(&info.ssid.val, ssid, ssid_len);
     info.ssid.len = ssid_len;
-    info.channel = channel;
-    info.band = rt_wlan_ap_channel_is_5g(channel) ? RT_802_11_BAND_5GHZ : RT_802_11_BAND_2_4GHZ;
+    info.channel = 6;
+    info.band = RT_802_11_BAND_2_4GHZ;
 
     /* Initializing events that need to wait */
     MGNT_LOCK();

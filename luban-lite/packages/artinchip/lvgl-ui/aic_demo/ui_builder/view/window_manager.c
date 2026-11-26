@@ -3,7 +3,6 @@
 #include "aic_ui.h"
 #include "logic.h"
 #include "vehicle_argument.h"
-#include "dvr_page.h"
 
 static window_e active_window =  WINDOW_MAIN ;//WINDOW_MAIN;
 static lv_obj_t* previous_scr = NULL;
@@ -13,53 +12,68 @@ bool window_manager_is_active(window_e window_id)
   return active_window == window_id;
 }
 
-void window_manager_set_target(window_e new_window) 
+void window_manager_set_target(window_e new_window)
 {
     if (new_window >= WINDOW_NULL || new_window == active_window)
         return ;
-    
+
     lv_obj_t * scr = NULL ;
 
-    switch (new_window) 
+    switch (new_window)
     {
     case WINDOW_MAIN:
         scr = home_page_get(&ui_manager)->obj;
         global_refresh_unit(vehicle_get_param_unit()) ;
+        if (active_window == WINDOW_MENU) {
+            /* 弹窗叠加在 home 上，home 已是活动屏：仅隐藏弹窗，不切屏不删除 */
+            setting_popup_hide();
+        } else {
+            /* 自 phone 等全屏屏退回：切回 home 并删除上一屏 */
+            lv_scr_load(scr);
+            if (previous_scr) {
+                lv_obj_delete(previous_scr);
+                previous_scr = NULL;
+                lv_log("lv_obj_delete successed\n");
+            }
+        }
         break;
     case WINDOW_MENU:
+        /* 构建或复用弹窗并显示；home 保持活动屏，弹窗作为 home 子对象显示 */
         setting_page_create(&ui_manager);
-        scr = setting_page_get(&ui_manager)->obj ;
+        setting_popup_show();
+        scr = home_page_get(&ui_manager)->obj;
+        if (lv_screen_active() != scr)
+            lv_scr_load(scr);
         break;
     case WINDOW_MOBILE:
         phone_page_create(&ui_manager);
         scr = phone_page_get(&ui_manager)->obj ;
+        lv_scr_load(scr);
         break;
-    case WINDOW_DEVICE:
-        /* dvr_page_create() already calls lv_screen_load() itself (it is
-         * designed to be usable standalone); the lv_scr_load(scr) below
-         * runs again on the same, already-active screen, which LVGL
-         * no-ops. Exiting back to WINDOW_MAIN is handled generically
-         * below via lv_obj_delete(previous_scr), which fires dvr_page.c's
-         * own LV_EVENT_DELETE cleanup hook (stop preview, re-enable the
-         * sensor switch, etc.) — no DVR-specific cleanup needed here. */
-        scr = dvr_page_create();
+    case WINDOW_DVR:
+        /* DVR 预览：切到纯黑空页，LVGL 停笔后由中间层直接写 UI layer。
+         * 从设置弹窗切入时先收起弹窗（它挂在 home 上，不收起的话返回主页
+         * 会重新露出来）；从手机互联页切入时 phone 是全屏临时页，已无人
+         * 引用，直接删除，避免 previous_scr 被覆盖后泄漏。 */
+        if (active_window == WINDOW_MENU)
+            setting_popup_hide();
+        if (active_window == WINDOW_MOBILE && previous_scr) {
+            lv_obj_delete(previous_scr);
+            previous_scr = NULL;
+        }
+        dvr_page_create(&ui_manager);
+        scr = dvr_page_get(&ui_manager)->obj;
+        lv_scr_load(scr);
         break;
+    case WINDOW_CP:
+    case WINDOW_LINK:
+        /* 预留：移植自 AWTK home_view dock 入口；
+         * 顶级页面实现未移植，此处只 log 不切换，避免崩溃。 */
+        LV_LOG_WARN("Window %d (AWTK reserved) not implemented, stay on current", (int)new_window);
+        return;
     default:
         LV_LOG_WARN("Unknown window type: %d", new_window);
         return;
-    }
-    
-    if (scr) {
-      lv_scr_load(scr);
-    }
-
-    if (new_window == WINDOW_MAIN && active_window != WINDOW_MAIN) {
-        if (previous_scr)
-        {
-            lv_obj_delete(previous_scr) ;
-            previous_scr = NULL ;
-            lv_log("lv_obj_delete successed\n") ;
-        }
     }
 
     previous_scr = scr ;

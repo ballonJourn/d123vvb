@@ -181,6 +181,42 @@ void panel_de_timing_disable(struct aic_panel *panel, u32 ms)
         aic_delay_ms(ms);
 }
 
+static void panel_gpio_out(const char *name, int level)
+{
+    unsigned int g, p;
+    long pin;
+
+    pin = hal_gpio_name2pin(name);
+    if (pin < 0)
+        return;
+
+    g = GPIO_GROUP(pin);
+    p = GPIO_GROUP_PIN(pin);
+
+    hal_gpio_direction_output(g, p);
+    if (level)
+        hal_gpio_set_output(g, p);
+    else
+        hal_gpio_clr_output(g, p);
+}
+
+void panel_display_enable(void)
+{
+    /* 上电时序: 退出 SLEEP -> RST 低脉冲 -> 释放 STBYB.
+     * RST 脉冲不能省: 看门狗复位唤醒时面板一直带电, 只是丢了 LVDS 时钟,
+     * 若本次上电只是把 RST 静态拉高, 面板接收不到复位沿, 可能停在失步
+     * 状态 —— 表现为画面四角白色光条, 且只有彻底断电才能恢复. */
+    panel_gpio_out("PD.17", 1);     /* 退出 SLEEP */
+    aic_delay_ms(5);
+
+    panel_gpio_out("PD.16", 0);     /* RST 复位脉冲 */
+    aic_delay_ms(10);
+    panel_gpio_out("PD.16", 1);
+    aic_delay_ms(10);
+
+    panel_gpio_out("PD.15", 1);     /* 释放 STBYB */
+}
+
 void panel_backlight_enable(struct aic_panel *panel, u32 ms)
 {
 #ifdef AIC_PM_INDEPENDENT_POWER_KEY
@@ -251,11 +287,21 @@ void panel_backlight_disable(struct aic_panel *panel, u32 ms)
 
 int panel_default_prepare(void)
 {
+    /* Panel power-on sequence: SLEEP/RST/STBYB, must run before DI clocks */
+    panel_display_enable();
+    aic_delay_ms(50);
     return 0;
 }
 
 int panel_default_unprepare(void)
 {
+    /* 下电(关屏)时把面板置于复位/待机态, 顺序与上电相反.
+     * 休眠期间面板仍带电, 如果保持使能又长时间没有 LVDS 时钟, 会锁死在
+     * 异常状态, 下次开机即使重新使能也恢复不了; 先收 STBYB/RST/SLEEP,
+     * 保证下次开机走完整的"复位脉冲 + 上电"流程. */
+    panel_gpio_out("PD.15", 0);     /* STBYB -> 待机 */
+    panel_gpio_out("PD.16", 0);     /* RST 保持复位 */
+    panel_gpio_out("PD.17", 0);     /* 进入 SLEEP */
     return 0;
 }
 
@@ -263,6 +309,7 @@ int panel_default_enable(struct aic_panel *panel)
 {
     panel_di_enable(panel, 0);
     panel_de_timing_enable(panel, 60);
+    aic_delay_ms(50);
     panel_backlight_enable(panel, 0);
     return 0;
 }

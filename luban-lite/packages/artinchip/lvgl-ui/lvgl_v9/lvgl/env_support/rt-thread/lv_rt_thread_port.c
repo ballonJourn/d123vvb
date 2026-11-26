@@ -52,6 +52,37 @@ static struct rt_thread lvgl_thread;
 
 static rt_uint8_t lvgl_thread_stack[LV_MAIN_THREAD_STACK_SIZE];
 
+/* 低功耗: 下电关屏前让 LVGL 线程自己停住.
+ * 本线程是 rt_thread_init + 静态栈创建的, 不能 delete; 这里用标志 + 信号量实现
+ * "请求-确认"握手, 由 pm 侧先 pause (等确认) 再关屏, 避免关屏时线程还在 flush.
+ * 当前唤醒方式为 rt_hw_cpu_reset 复位重启, resume 仅供将来软唤醒使用. */
+static struct rt_semaphore s_lvgl_resume_sem;
+static volatile rt_bool_t s_lvgl_paused = RT_FALSE;
+static volatile rt_bool_t s_lvgl_pause_ack = RT_FALSE;
+
+rt_bool_t lvgl_pm_pause(void)
+{
+    s_lvgl_paused = RT_TRUE;
+
+    /* 线程 1ms 一轮, 100ms 内没确认就是卡在绘制里, 不再等.
+     * 返回值: RT_TRUE 已停住; RT_FALSE 超时 —— 调用方此时不能再去关显示
+     * 硬件(DE 时钟), 否则线程恢复后写 DE 寄存器可能挂总线 / 等 VSYNC 死等 */
+    for (int i = 0; i < 100 && !s_lvgl_pause_ack; i++)
+        rt_thread_mdelay(1);
+
+    return s_lvgl_pause_ack;
+}
+
+void lvgl_pm_resume(void)
+{
+    if (!s_lvgl_paused)
+        return;
+
+    s_lvgl_paused = RT_FALSE;
+    s_lvgl_pause_ack = RT_FALSE;
+    rt_sem_release(&s_lvgl_resume_sem);
+}
+
 #if LV_USE_LOG
 static void lv_rt_log(lv_log_level_t level, const char *buf)
 {
@@ -145,6 +176,12 @@ static void lvgl_thread_entry(void *parameter)
     /* handle the tasks of LVGL */
     while(1)
     {
+        if (s_lvgl_paused)
+        {
+            s_lvgl_pause_ack = RT_TRUE;
+            rt_sem_take(&s_lvgl_resume_sem, RT_WAITING_FOREVER);
+            continue;
+        }
 #ifdef RT_USING_PM
         rt_pm_module_request(PM_MAIN_ID, PM_SLEEP_MODE_NONE);
 #endif
@@ -159,6 +196,8 @@ static void lvgl_thread_entry(void *parameter)
 int lvgl_thread_init(void)
 {
     rt_err_t err;
+
+    rt_sem_init(&s_lvgl_resume_sem, "lvgl_res", 0, RT_IPC_FLAG_FIFO);
 
     err = rt_thread_init(&lvgl_thread, "LVGL", lvgl_thread_entry, RT_NULL,
            &lvgl_thread_stack[0], sizeof(lvgl_thread_stack), LPKG_LVGL_THREAD_PRIO, 10);

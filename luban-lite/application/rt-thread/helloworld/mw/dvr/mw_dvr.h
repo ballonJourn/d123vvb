@@ -22,13 +22,13 @@ extern "C" {
 #include <fcntl.h>
 
 /* LCD / OSD dimensions — fallback defaults when the project does not
- * expose them through any panel config header. 1024x600 matches the
- * project's active panel (see CARLINK_EC_WIDTH/HEIGHT in dev_config.h). */
+ * expose them through any panel config header. 800x480 matches this
+ * project's active panel (UI_RES_DIR = '800x480'). */
 #ifndef LCD_WIDTH
-#define LCD_WIDTH   1024
+#define LCD_WIDTH   800
 #endif
 #ifndef LCD_HEIGHT
-#define LCD_HEIGHT  600
+#define LCD_HEIGHT  480
 #endif
 #ifndef OSD_WIDTH
 #define OSD_WIDTH   LCD_WIDTH
@@ -154,6 +154,15 @@ void     dvr_get_status(void);
 void     dvr_start_if_elene_exists(void);
 void     dvr_usb_eval_and_apply(bool state);
 
+/* 拔盘/停止预览：关预览门控 + 置 running=0 通知 DVR 线程退出，并立即
+ * 恢复 VEH_DVR_PLAYING=0。非阻塞；线程收尾（关文件/释放 buffer）异步完成。 */
+void     dvr_usb_stop(void);
+
+/* DVR 线程是否已完全停止（任务退出且 /udisk/elene 已关闭）。
+ * usbhost 的延迟清理线程必须等它返回 1 才能 unmount，否则
+ * dfs_file_close 与 f_mount(NULL) 竞争会访问已释放的 FatFs 对象。 */
+uint8_t  dvr_usb_is_stopped(void);
+
 /* ---------- Status getters ---------- */
 uint8_t  dvr_get_sd_status(void);
 uint8_t  dvr_get_rec_status(void);
@@ -219,10 +228,7 @@ void     dvr_api_del_file(uint8_t mode, uint16_t index);
 void     dvr_api_lock_file(uint16_t index);
 void     dvr_api_unlock_file(uint16_t index);
 void     dvr_api_get_total_time(uint16_t index);
-uint8_t  dvr_api_get_total_time_result(uint16_t index, uint32_t *seconds_out);
-void     dvr_api_clear_total_time(void);
 uint8_t  dvr_api_is_del_ack(void);
-uint8_t  dvr_api_get_del_ack(uint16_t *par_out, uint16_t *status_out);
 void     dvr_api_clear_del_ack(void);
 
 /* ---------- Status / TF card capacity ---------- */

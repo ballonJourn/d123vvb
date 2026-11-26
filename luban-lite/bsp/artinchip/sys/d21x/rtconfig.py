@@ -37,8 +37,8 @@ B_CFLAGS = ''
 LFLAGS = ''
 # BUILD = 'debug'
 BUILD = 'release'
- BACKTRACE = True
-# BACKTRACE = False
+# BACKTRACE = True
+BACKTRACE = False
 
 if BUILD == 'debug':
     CFLAGS_DBG = ' -O0 -gdwarf-2'

@@ -451,15 +451,7 @@
 /* Define IP_FORWARD to 1 if you wish to have the ability to forward
    IP packets across network interfaces. If you are going to run lwIP
    on a device with only one network interface, define this to 0. */
-#if defined(LWIP_USING_DHCPD) && !defined(LWIP_IP_ACCEPT_UDP_PORT)
-#define LWIP_IP_ACCEPT_UDP_PORT(port)   ((port) == PP_NTOHS(67))
-#endif
-
-#ifdef RT_LWIP_IP_FORWARD
-#define IP_FORWARD                  1
-#else
 #define IP_FORWARD                  0
-#endif
 
 /* IP reassembly and segmentation.These are orthogonal even
  * if they both deal with IP fragments */
@@ -527,9 +519,6 @@
 #ifdef RT_LWIP_STATS
 #define LWIP_STATS                  1
 #define LWIP_STATS_DISPLAY          1
-/* 32-bit counters: the default u16_t wraps every few seconds at stream rates (a 1000 packet/s
-   forward counter wraps after 65 s), which a reader cannot tell from a reset. */
-#define LWIP_STATS_LARGE            1
 #else
 #define LWIP_STATS                  0
 #endif

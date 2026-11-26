@@ -3,10 +3,15 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <inttypes.h>
+#include <rtthread.h>
+#include <stdlib.h>
 #include "set_param.h"
 #include "vehicle_param.h"
 #include "json_param_parse.h"
+#include "find_file_name.h"
 #include "app_log.h"
+#include "usr_backlight.h"
+#include "power_manage.h"
 
 #define USE_PARAM_PRINTF (1)
 
@@ -67,6 +72,7 @@ static void printf_usr_param(usr_param_t * param) {
         printf("phone_type:%d\r\n", param->usr_set.phone_type);
         printf("sys_log:%d\r\n", param->usr_set.sys_log);
         printf("drive_mode:%d\r\n", param->usr_set.drive_mode);
+        printf("reset_type:%d\r\n", param->usr_set.reset_type);
 
         printf("ride_time_a:%lu\r\n", param->ride_info.ride_time_a);     
         printf("ride_time_b:%lu\r\n", param->ride_info.ride_time_b);    
@@ -142,6 +148,10 @@ static void check_usr_param(void) {
         usr_param.usr_set.drive_mode = 0;
     }
 
+    if (usr_param.usr_set.reset_type > 1) {
+        usr_param.usr_set.reset_type = 0;
+    }
+
     if (usr_param.maintain_info.maintain_mile.maintain_count == 0xffff) {
         usr_param.maintain_info.maintain_mile.maintain_count = 0;
     }
@@ -172,16 +182,18 @@ static void check_usr_param(void) {
 #endif
 
     vehicle_set_data(VEH_LICENSE_AUTH_STATUS, (int)usr_param.usr_set.uuid_active_staus);
-#if 1
+#if MW_BL_PW_ENABLE
     if (usr_param.usr_set.brightness != 0) {
-        //set_backlight_level(usr_param.usr_set.brightness);
+        set_backlight_level(usr_param.usr_set.brightness);
     } else {
-        //init_auto_backlight(3);
+        rt_log_info("current platform not support autobacklight\n");
+        set_backlight_level(3);
     }
 #endif
 }
 
 static void check_start_source(uint8_t start_src) {
+#if POWER_MANAGE_ENABLE
     if (start_src) {
         start_by_acc = true;
         rt_log_info("\r\nStart by acc\n");
@@ -190,18 +202,23 @@ static void check_start_source(uint8_t start_src) {
         usr_param.usr_set.mile_format = 0;
         usr_param.usr_set.mile_display = 0,
         usr_param.usr_set.language = 0;
-        usr_param.usr_set.theme = 0;
+        usr_param.usr_set.theme = 1;
+        usr_param.usr_set.reset_type = 0;
         usr_param.usr_set.bt_switch = 1;
         usr_param.usr_set.tpms_unit = 0;
         usr_param.usr_set.brightness = 3;
         usr_param.usr_set.auto_headlight = 0;
     }
-
+#else
+    start_by_acc = true;
+#endif
+    
     check_usr_param();
     is_recovery_usr_param = true;
 }
 
-int save_usr_param(void) {
+///< 落盘主体, 不受下电闸门限制 —— 供 shutdown_save_usr_param() 做最后一次保存
+static int save_usr_param_internal(void) {
     if (!is_recovery_usr_param) {
         rt_log_info("Usr param is not get ready!\n");
         return -1;
@@ -218,6 +235,36 @@ int save_usr_param(void) {
         rt_log_error("save usr set param file failed!\n");
         return -1;
     }
+
+    return 0;
+}
+
+int save_usr_param(void) {
+    ///< 下电中: 丢弃非下电触发的落盘, 避免写入被断电截断
+    if (power_is_off_pending()) {
+        rt_log_info("power off pending, drop usr param save!\n");
+        return 0;
+    }
+
+    return save_usr_param_internal();
+}
+
+/**
+ * @brief  关机前保存用户参数: 启动源置 1(下次开机识别为 ACC 启动)并落盘.
+ *         由 power_off_request() 统一下电入口调用, 走不受闸门限制的强制路径.
+ * @return 0:保存成功  -1:保存失败(失败时已延时 100ms)
+ */
+int shutdown_save_usr_param(void)
+{
+    uint8_t stat_src = 1;
+    set_usr_param(USR_PARAM_START_SRC, &stat_src);
+    rt_log_info("save usr param..\n");
+    if (save_usr_param_internal() != 0) {
+        rt_log_info("save usr param failed!\n");
+        rt_thread_mdelay(100);
+        return -1;
+    }
+    rt_log_info("save usr param success!\n");
 
     return 0;
 }
@@ -325,6 +372,10 @@ bool get_usr_param(usr_param_handle_e id, void *param) {
             *((uint8_t *)param) = usr_param.usr_set.drive_mode;
             break;
 
+        case USR_PARAM_RESET_TYPE:
+            *((uint8_t *)param) = usr_param.usr_set.reset_type;
+            break;
+
         case USR_PARAM_EC_UUID:
             snprintf((char *)param, sizeof(usr_param.carlink_uuid), 
                     "%s", usr_param.carlink_uuid);
@@ -353,6 +404,10 @@ bool get_usr_param(usr_param_handle_e id, void *param) {
         case USR_PARAM_RIGHT_REAR_TIRE_INFO:
             memcpy(param, &usr_param.tpms[TPMS_RIGHT_REAR], sizeof(tpms_param_t));
             break;
+
+        case USR_PARAM_BT_TPMS_MAC:
+            memcpy(param, usr_param.bt_tpms_mac, sizeof(usr_param.bt_tpms_mac));
+            break;
             
         case USR_PARAM_MCU_UPDATE_LEN:
             *((uint16_t *)param) = usr_param.mcu_update.update_mcu_len;
@@ -360,7 +415,19 @@ bool get_usr_param(usr_param_handle_e id, void *param) {
 
         case USR_PARAM_MCU_UPDATE_TYPE:
             *((uint8_t *)param) = usr_param.mcu_update.update_type;
-            break;    
+            break;
+
+        case USR_PARAM_START_SRC:
+            *((uint8_t *)param) = usr_param.usr_set.start_src;
+            break;
+
+        /* 续航参考里程数组: 传入 uint8_t[REF_MILE_ARR_NUM] 缓冲 */
+        case USR_PARAM_REF_MILE_ARR_P1:
+        case USR_PARAM_REF_MILE_ARR_P2:
+        case USR_PARAM_REF_MILE_ARR_P3:
+            memcpy(param, usr_param.ref_mile_arr[id - USR_PARAM_REF_MILE_ARR_P1],
+                   REF_MILE_ARR_NUM);
+            break;
 
         default:
             status = false;
@@ -539,7 +606,14 @@ bool set_usr_param(usr_param_handle_e id, void *param) {
 
         case USR_PARAM_DRIVE_MODE:
             if (usr_param.usr_set.drive_mode != *((uint8_t *)param)) {
-                usr_param.usr_set.drive_mode = *((uint8_t *)param); 
+                usr_param.usr_set.drive_mode = *((uint8_t *)param);
+                is_save = true;
+            }
+            break;
+
+        case USR_PARAM_RESET_TYPE:
+            if (usr_param.usr_set.reset_type != *((uint8_t *)param)) {
+                usr_param.usr_set.reset_type = *((uint8_t *)param);
                 is_save = true;
             }
             break;
@@ -601,6 +675,15 @@ bool set_usr_param(usr_param_handle_e id, void *param) {
             }
             break;
 
+        case USR_PARAM_BT_TPMS_MAC:
+            is_save = true;     ///< 配对信息必须落盘
+            if (memcmp(usr_param.bt_tpms_mac, param,
+                       sizeof(usr_param.bt_tpms_mac)) != 0) {
+                memcpy(usr_param.bt_tpms_mac, param,
+                       sizeof(usr_param.bt_tpms_mac));
+            }
+            break;
+
         case USR_PARAM_MCU_UPDATE_LEN:
             if (usr_param.mcu_update.update_mcu_len != *((uint16_t *)param)) {
                 usr_param.mcu_update.update_mcu_len = *((uint16_t *)param);  
@@ -610,10 +693,29 @@ bool set_usr_param(usr_param_handle_e id, void *param) {
 
         case USR_PARAM_MCU_UPDATE_TYPE:
             if (usr_param.mcu_update.update_type != *((uint8_t *)param)) {
-                usr_param.mcu_update.update_type = *((uint8_t *)param);  
+                usr_param.mcu_update.update_type = *((uint8_t *)param);
                 is_save = true;
             }
-            break;   
+            break;
+
+        case USR_PARAM_START_SRC:
+            if (usr_param.usr_set.start_src != *((uint8_t *)param)) {
+                usr_param.usr_set.start_src = *((uint8_t *)param);
+                is_save = true;
+            }
+            break;
+
+        /* 续航参考里程数组: 传入 uint8_t[REF_MILE_ARR_NUM] 缓冲 */
+        case USR_PARAM_REF_MILE_ARR_P1:
+        case USR_PARAM_REF_MILE_ARR_P2:
+        case USR_PARAM_REF_MILE_ARR_P3: {
+            uint8_t *dst = usr_param.ref_mile_arr[id - USR_PARAM_REF_MILE_ARR_P1];
+            if (memcmp(dst, param, REF_MILE_ARR_NUM) != 0) {
+                memcpy(dst, param, REF_MILE_ARR_NUM);
+                is_save = true;
+            }
+            break;
+        }
 
         default:
             is_save = false;
@@ -627,6 +729,8 @@ bool set_usr_param(usr_param_handle_e id, void *param) {
             return false;
         }
     }
+#else
+    (void)is_save;
 #endif
 
     return true;
@@ -644,6 +748,9 @@ int usr_param_init(void) {
     if (usr_param.usr_set.start_src == 1) {
         usr_param.usr_set.start_src = 0;
         check_start_source(1);
+        if (save_usr_param() != 0) {
+            rt_log_error("save start src param failed!\n");
+        }
     } else {
         check_start_source(0);
     }
@@ -667,4 +774,35 @@ void clean_eeprom_operate(void) {
     if (save_usr_param() != 0) {
         rt_log_info("Clear eeprom save usr param failed!\r\n");
     }
+}
+
+/**
+ * @brief  恢复出厂设置: 删除落盘的用户参数 JSON 文件, 随后立即复位重启.
+ *         只动 JSON, 不碰 EEPROM 里程/保养等其它数据.
+ *         重启后 read_set_param() 找不到 /temp 副本会按默认值重建, 故此处无需写默认值.
+ * @return -1:失败(未重启)  成功时不返回(已复位)
+ */
+int restore_factory_usr_param(void) {
+    char file_path[128] = {0};
+    char *file_name = find_file_name(DEST_CONFIG_FILE_PATH,
+                                     CONFIG_FILE_SUFFIX, SET_PARAM_PREFIX);
+
+    if (!file_name || strlen(file_name) == 0) {
+        rt_log_error("usr param file not found, reset abort!\n");
+        return -1;
+    }
+
+    snprintf(file_path, sizeof(file_path), "%s/%s%s",
+             DEST_CONFIG_FILE_PATH, file_name, CONFIG_FILE_SUFFIX);
+
+    if (remove(file_path) != 0) {
+        rt_log_error("remove %s failed!\n", file_path);
+        return -1;
+    }
+    rt_log_info("usr param %s removed, reboot...\n", file_path);
+
+    rt_thread_mdelay(500);      /* 等 littlefs 把删除提交落盘, 再重启 */
+    system("reboot");
+
+    return 0;
 }

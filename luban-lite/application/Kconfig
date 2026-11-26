@@ -364,12 +364,7 @@ config AIC_LVGL_DOUBLE_DISP_DEMO
 
 endchoice
 
-endif # AIC_LVGL_DEMO
 
-# Generic LVGL options: they only depend on LPKG_USING_LVGL / LVGL_V_9, so they
-# must exist when LVGL runs without a demo (AIC_LVGL_DEMO off) as well.
-# Otherwise LV_COLOR_DEPTH, LV_CACHE_IMG_NUM and LV_CACHE_DEF_SIZE vanish and
-# LVGL falls back to its 32 bit default on an RGB565 framebuffer.
 
 config LV_COLOR_DEPTH
     int "LVGL color depth(32/16)"
@@ -465,7 +460,6 @@ if !AIC_LVGL_MUSIC_DEMO && !AIC_LVGL_DEMO_WIDGETS && !AIC_LVGL_DEMO_BENCHMARK
         bool "LVGL use custom config"
         default y
         depends on LPKG_USING_LVGL
-        depends on AIC_LVGL_DEMO    # lv_conf_custom.h belongs to the demos
 endif
 
 config LV_MEM_HEAP_ADAPTIVE_SUPPORT
@@ -491,8 +485,6 @@ config LV_SPI_HARDWARE
     default n
     depends on LVGL_V_9
     select AIC_LVGL_SPI_WIDGET
-
-if AIC_LVGL_DEMO
 
 # Parameters for LVGL meter demo
 if AIC_LVGL_METER_DEMO

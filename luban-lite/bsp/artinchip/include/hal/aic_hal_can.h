@@ -279,6 +279,7 @@ static inline void hal_can_disable_interrupt(can_handle *phandle)
 #define CAN_EVENT_TX_DONE        0x02    /* Tx complete   */
 #define CAN_EVENT_TX_FAIL        0x03    /* Tx fail   */
 #define CAN_EVENT_RXOF_IND       0x06    /* Rx overflow */
+#define CAN_EVENT_WAKEUP         0x07    /* 休眠模式下检测到总线活动 */
 
 int hal_can_init(can_handle *phandle, u32 can_idx);
 void hal_can_uninit(can_handle *phandle);

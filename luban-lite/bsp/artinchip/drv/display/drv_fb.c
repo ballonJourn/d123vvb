@@ -351,6 +351,11 @@ static int aicfb_suspend(const struct rt_device *device, rt_uint8_t mode)
     {
         struct aicfb_layer_data layer = {0};
 
+        /* 应用层已通过 AICFB_POWEROFF 主动关屏(下电低功耗场景):
+         * PM 不应再关/开面板和 DE 时钟, 否则每次唤醒都会把屏重新点亮 */
+        if (!fbi->power_on)
+            break;
+
         #ifdef AIC_PM_INDEPENDENT_POWER_KEY
         fbi->panel->independent_pwkey = 1;
         #endif
@@ -387,6 +392,10 @@ static void aicfb_resume(const struct rt_device *device, rt_uint8_t mode)
     case PM_SLEEP_MODE_STANDBY:
     {
         struct aicfb_layer_data layer = {0};
+
+        /* 与 suspend 对称: 应用已主动关屏时, 唤醒不要重新点亮 */
+        if (!fbi->power_on)
+            break;
 
         aicfb_enable_clk(fbi, AICFB_ON);
 

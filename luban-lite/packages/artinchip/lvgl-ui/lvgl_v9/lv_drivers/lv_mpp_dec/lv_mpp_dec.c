@@ -735,10 +735,6 @@ static void lv_mpp_dec_close(lv_image_decoder_t *decoder, lv_image_decoder_dsc_t
     mpp_decoder_data_t *mpp_data =  (mpp_decoder_data_t *)dsc->decoded;
     LV_UNUSED(decoder);
 
-    /* LVGL (v9.2+ draw code) calls close after a failed open too */
-    if (!mpp_data)
-        return;
-
     if (!mpp_data->cached) {
         mpp_dec_data_release(mpp_data);
     } else {
