@@ -71,6 +71,9 @@ static const char *s_name;
 #ifndef BLE_NAVI_ERYA_NAME_PREFIX
 #define BLE_NAVI_ERYA_NAME_PREFIX "EY_"
 #endif
+#ifndef BLE_NAVI_ERYA_DEVICE_ID
+#define BLE_NAVI_ERYA_DEVICE_ID ""
+#endif
 /* 尔雅: characteristics 0xAAA1..0xAAAA. The document does not say which
  * property each one has, so all of them allow read, write, write without
  * response and notify; the app picks what it uses. */
@@ -501,6 +504,16 @@ static void on_sync(void)
                                 addr, NULL) == 0) {
             rt_snprintf(mac, sizeof(mac), "%02X%02X%02X%02X%02X%02X",
                         addr[5], addr[4], addr[3], addr[2], addr[1], addr[0]);
+            if (BLE_NAVI_ERYA_DEVICE_ID[0]) {
+                /* a code the app already activated (Kconfig), not the address */
+                rt_kprintf("[erya] device code %s (fixed), controller address %s\n",
+                           BLE_NAVI_ERYA_DEVICE_ID, mac);
+                if (strlen(BLE_NAVI_ERYA_DEVICE_ID) != 12)
+                    rt_kprintf("[erya] warning: device code is %u characters, expected 12\n",
+                               (unsigned)strlen(BLE_NAVI_ERYA_DEVICE_ID));
+                rt_strncpy(mac, BLE_NAVI_ERYA_DEVICE_ID, 12);
+                mac[12] = 0;
+            }
             ble_navi_erya_set_mac(mac);
             rt_snprintf(s_erya_name, sizeof(s_erya_name), "%s%s", BLE_NAVI_ERYA_NAME_PREFIX, mac);
             s_name = s_erya_name;

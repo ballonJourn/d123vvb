@@ -149,7 +149,11 @@ CONFIG_LPKG_NIMBLE_HCI_UART_RX_THREAD_PRIORITY=9
 CONFIG_LPKG_NIMBLE_HCI_UART_RX_BUFSZ=4096
 # 尔雅 debug model key (debug phase only; replace with the production key before release)
 CONFIG_BLE_NAVI_ERYA_MODEL_KEY="EYMOTOR12FCB99FD224DB2B22F5A7703"
+# device code already activated in the 尔雅 app (AAA5 and the name EY_<code>)
+CONFIG_BLE_NAVI_ERYA_DEVICE_ID="CCC4V2V64DA0"
 # link parameters as the last demo88 A/B test (2026-11-20)
 # CONFIG_BLE_NAVI_CONN_CE_FULL is not set
 # CONFIG_BLE_NAVI_CONN_L2CAP_FALLBACK is not set
 CONFIG_BLE_NAVI_CONN_INTERVAL_MIN_MS=0
+# ask for the largest ATT MTU; the phone decides (log: "ATT MTU n -> chunk")
+CONFIG_BLE_NAVI_PREF_MTU=517

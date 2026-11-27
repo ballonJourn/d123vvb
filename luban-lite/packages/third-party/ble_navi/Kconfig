@@ -158,6 +158,17 @@ config BLE_NAVI_ERYA_MODEL_KEY
     string "车型 key (issued by 尔雅 after the business agreement)"
     default ""
 
+config BLE_NAVI_ERYA_DEVICE_ID
+    string "Fixed 尔雅 device code (empty = BT controller address)"
+    default ""
+    help
+      The 12-character code the board reports on AAA5 ("<code>&<key>") and
+      advertises as BLE_NAVI_ERYA_NAME_PREFIX + code. Empty: the controller
+      address, upper-case hex. Set it to a code the app has already
+      activated to skip activation on a new board. Only the reported code
+      changes, not the BLE address itself; two boards with the same code
+      must not be powered at the same time.
+
 config BLE_NAVI_ERYA_PIC_W
     int "Requested picture width"
     default 480
